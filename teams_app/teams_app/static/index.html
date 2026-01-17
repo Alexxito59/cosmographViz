@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LIS Teams Explorer</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --panel: #f7f7f8;
+      --border: #d7d7dc;
+      --text: #1f1f26;
+      --muted: #6a6a72;
+      --accent: #0f6aeb;
+      --accent-2: #1b7f3a;
+      --accent-3: #1a5fb4;
+      --shadow: 0 8px 24px rgba(23, 26, 31, 0.12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      height: 100vh;
+      overflow: hidden;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 320px 1fr 340px;
+      height: 100vh;
+    }
+    .panel {
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow: hidden;
+    }
+    .panel:last-child {
+      border-left: 1px solid var(--border);
+      border-right: none;
+    }
+    h1 {
+      font-size: 18px;
+      margin: 0;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+    h2 {
+      font-size: 14px;
+      margin: 0 0 6px 0;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
+    }
+    select, input, button {
+      font: inherit;
+    }
+    .control {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .control label {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .control input, .control select {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #fff;
+    }
+    .control-row {
+      display: flex;
+      gap: 8px;
+    }
+    .control-row button {
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      padding: 10px 12px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: transform 0.08s ease, box-shadow 0.12s ease;
+      box-shadow: 0 4px 10px rgba(15, 106, 235, 0.25);
+    }
+    .control-row button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 16px rgba(15, 106, 235, 0.25);
+    }
+    .list {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 8px;
+      overflow: auto;
+      flex: 1;
+      min-height: 0;
+    }
+    .team-item {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      background: #fff;
+      transition: border-color 0.1s ease, transform 0.08s ease;
+    }
+    .team-item:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .team-item.active { border-color: var(--accent); box-shadow: 0 6px 16px rgba(15, 106, 235, 0.12); }
+    .team-title { font-weight: 700; font-size: 15px; }
+    .team-sub { color: var(--muted); font-size: 12px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--muted);
+      background: #f0f1f5;
+      margin-right: 6px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+    .dot.core { background: var(--accent-2); }
+    .dot.periphery { background: var(--accent-3); }
+    .dot.other { background: #a3a3a3; }
+    .detail-section { flex: 1; display: flex; flex-direction: column; gap: 12px; }
+    .split { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .author-row, .pub-row {
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #fff;
+      margin-bottom: 8px;
+    }
+    .author-row .name { font-weight: 600; }
+    .author-row .status { font-size: 12px; color: var(--muted); }
+    .pub-authors { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+    .chip {
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: #fff;
+    }
+    .chip.core { background: var(--accent-2); }
+    .chip.periphery { background: var(--accent-3); }
+    .chip.other { background: #9a9a9a; }
+    .pub-title { font-weight: 600; margin-bottom: 4px; }
+    .central {
+      position: relative;
+      background: #fff;
+      overflow: hidden;
+    }
+    #graph {
+      width: 100%;
+      height: 100%;
+    }
+    .toolbar {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      display: flex;
+      gap: 8px;
+      z-index: 2;
+    }
+    .toolbar .block {
+      background: rgba(255,255,255,0.95);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px;
+      box-shadow: var(--shadow);
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .toolbar label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .toolbar input[type="range"] {
+      width: 140px;
+    }
+    .graph-controls {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      gap: 8px;
+      z-index: 2;
+    }
+    .floating-btn {
+      border: none;
+      background: rgba(255,255,255,0.95);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 14px;
+      cursor: pointer;
+      box-shadow: var(--shadow);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.35);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+    .modal.active { display: flex; }
+    .modal-card {
+      background: #fff;
+      padding: 20px;
+      border-radius: 14px;
+      width: 400px;
+      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
+    }
+    .modal h3 { margin: 0 0 12px 0; }
+    .modal .control { margin-bottom: 10px; }
+    .small { font-size: 12px; color: var(--muted); }
+    .empty { color: var(--muted); text-align: center; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="panel">
+      <div class="row" style="align-items: flex-start;">
+        <div>
+          <div class="small">Скользящее окно</div>
+          <h1>Команды</h1>
+        </div>
+        <button id="settingsBtn" class="floating-btn" style="padding: 8px 10px; box-shadow: none;">Настройки</button>
+      </div>
+      <div class="control">
+        <label for="periodSelect">Период</label>
+        <select id="periodSelect"></select>
+      </div>
+      <div class="control">
+        <label for="authorSearch">Поиск команды по автору</label>
+        <div class="control-row">
+          <input id="authorSearch" type="text" placeholder="Фамилия или имя" />
+          <button id="searchBtn">Найти</button>
+          <button id="clearSearchBtn" style="background:#e9e9ee; color:#1f1f26; box-shadow:none;">Сброс</button>
+        </div>
+      </div>
+      <div class="split">
+        <h2>Список команд</h2>
+        <div id="teamsList" class="list"></div>
+      </div>
+    </aside>
+
+    <main class="central">
+      <div id="graph"></div>
+      <div class="toolbar">
+        <div class="block">
+          <label for="nodeSize">Размер узлов</label>
+          <input type="range" id="nodeSize" min="0.5" max="3" step="0.1" value="1.2" />
+        </div>
+        <div class="block">
+          <label for="edgeWidth">Толщина ребер</label>
+          <input type="range" id="edgeWidth" min="0.2" max="1.5" step="0.05" value="0.6" />
+        </div>
+      </div>
+      <div class="graph-controls">
+        <div id="fitControl"></div>
+        <div id="zoomControl"></div>
+        <button id="playPause" class="floating-btn">Пауза</button>
+      </div>
+    </main>
+
+    <aside class="panel">
+      <div class="row" style="align-items: flex-start;">
+        <div>
+          <div class="small">Выбранная команда</div>
+          <h1 id="teamTitle">–</h1>
+        </div>
+      </div>
+      <div class="split">
+        <h2>Авторы</h2>
+        <div id="authorsList" class="list"></div>
+      </div>
+      <div class="split">
+        <h2>Публикации в периоде</h2>
+        <div id="pubsList" class="list"></div>
+      </div>
+    </aside>
+  </div>
+
+  <div id="settingsModal" class="modal">
+    <div class="modal-card">
+      <h3>Параметры симуляции</h3>
+      <div class="control">
+        <label for="gravity">Gravity</label>
+        <input type="range" id="gravity" min="0" max="1.5" step="0.05" value="0.25" />
+      </div>
+      <div class="control">
+        <label for="repulsion">Repulsion</label>
+        <input type="range" id="repulsion" min="0.2" max="4" step="0.1" value="1.0" />
+      </div>
+      <div class="control">
+        <label for="linkStrength">Link strength</label>
+        <input type="range" id="linkStrength" min="0.1" max="4" step="0.1" value="1.0" />
+      </div>
+      <div class="control">
+        <label for="linkDistance">Link distance</label>
+        <input type="range" id="linkDistance" min="2" max="60" step="1" value="16" />
+      </div>
+      <div class="control">
+        <label for="friction">Friction</label>
+        <input type="range" id="friction" min="0.2" max="1.0" step="0.05" value="0.85" />
+      </div>
+      <div class="control">
+        <label for="clusterRepulsion">Cluster repulsion</label>
+        <input type="range" id="clusterRepulsion" min="0.2" max="4" step="0.1" value="1.0" />
+      </div>
+      <div class="control">
+        <label for="maxAuthors">Max authors / doc (graph)</label>
+        <input type="range" id="maxAuthors" min="0" max="500" step="10" value="100" />
+        <div class="small">0 = без ограничения (может взорвать число ребер из-за больших коллабораций)</div>
+      </div>
+      <div class="control">
+        <label style="display:flex; align-items:center; gap:10px;">
+          <input type="checkbox" id="includeSinglePub" />
+          Показывать авторов с 1 публикацией
+        </label>
+      </div>
+      <div class="row" style="justify-content: flex-end; gap: 8px; margin-top: 8px;">
+        <button id="closeSettings" class="floating-btn" style="box-shadow: none;">Закрыть</button>
+        <button id="applySettings" class="floating-btn">Применить</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import {
+      Cosmograph,
+      CosmographButtonFitView,
+      CosmographButtonZoomInOut,
+    } from "https://esm.sh/@cosmograph/cosmograph@2.0.0";
+
+    const state = {
+      periods: [],
+      teams: [],
+      selectedPeriod: null,
+      selectedTeam: null,
+      nodes: [],
+      edges: [],
+      teamMembers: new Map(),
+      graph: null,
+      controls: {},
+      nodeSizeScale: 1.2,
+      edgeWidthScale: 0.6,
+      maxAuthorsPerDoc: 100,
+      includeSinglePub: false,
+      simulation: {
+        gravity: 0.25,
+        repulsion: 1.0,
+        linkStrength: 1.0,
+        linkDistance: 16,
+        friction: 0.85,
+        clusterRepulsion: 1.0,
+      },
+    };
+
+    const colors = {
+      neutral: "#d3d3dc",
+      core: "#1b7f3a",
+      periphery: "#1a5fb4",
+      other: "#9a9a9a",
+      link: "#d3d3dc",
+    };
+
+    const periodSelect = document.getElementById("periodSelect");
+    const authorSearch = document.getElementById("authorSearch");
+    const searchBtn = document.getElementById("searchBtn");
+    const clearSearchBtn = document.getElementById("clearSearchBtn");
+    const teamsList = document.getElementById("teamsList");
+    const authorsList = document.getElementById("authorsList");
+    const pubsList = document.getElementById("pubsList");
+    const teamTitle = document.getElementById("teamTitle");
+    const nodeSizeInput = document.getElementById("nodeSize");
+    const edgeWidthInput = document.getElementById("edgeWidth");
+    const playPauseBtn = document.getElementById("playPause");
+    const settingsModal = document.getElementById("settingsModal");
+    const settingsBtn = document.getElementById("settingsBtn");
+    const closeSettings = document.getElementById("closeSettings");
+    const applySettings = document.getElementById("applySettings");
+
+    const settingInputs = {
+      gravity: document.getElementById("gravity"),
+      repulsion: document.getElementById("repulsion"),
+      linkStrength: document.getElementById("linkStrength"),
+      linkDistance: document.getElementById("linkDistance"),
+      friction: document.getElementById("friction"),
+      clusterRepulsion: document.getElementById("clusterRepulsion"),
+      maxAuthors: document.getElementById("maxAuthors"),
+      includeSinglePub: document.getElementById("includeSinglePub"),
+    };
+
+    function fmtName(item) {
+      return [item.lastname, item.givenname].filter(Boolean).join(" ");
+    }
+
+    async function fetchJson(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      return res.json();
+    }
+
+    async function loadPeriods() {
+      const data = await fetchJson("/api/periods");
+      state.periods = data.periods || [];
+      periodSelect.innerHTML = "";
+      state.periods.forEach((p) => {
+        const opt = document.createElement("option");
+        opt.value = p;
+        opt.textContent = p;
+        periodSelect.appendChild(opt);
+      });
+      state.selectedPeriod = state.periods[0] || null;
+      if (state.selectedPeriod) {
+        periodSelect.value = state.selectedPeriod;
+      }
+    }
+
+    async function loadTeams() {
+      if (!state.selectedPeriod) return;
+      const query = authorSearch.value.trim();
+      const qs = new URLSearchParams({ period: state.selectedPeriod });
+      if (query) qs.set("query", query);
+      const data = await fetchJson(`/api/teams?${qs.toString()}`);
+      state.teams = data.teams || [];
+      renderTeams();
+    }
+
+    function renderTeams() {
+      teamsList.innerHTML = "";
+      if (!state.teams.length) {
+        teamsList.innerHTML = '<div class="empty">Нет команд</div>';
+        return;
+      }
+      state.teams.forEach((team) => {
+        const item = document.createElement("div");
+        item.className = "team-item" + (state.selectedTeam === team.team_id ? " active" : "");
+        item.innerHTML = `
+          <div class="row">
+            <div>
+              <div class="team-title">Команда #${team.team_id}</div>
+              <div class="team-sub">${team.sample_authors || "—"}</div>
+            </div>
+            <div>
+              <span class="badge"><span class="dot core"></span>${team.core_count}</span>
+              <span class="badge"><span class="dot periphery"></span>${team.periphery_count}</span>
+            </div>
+          </div>
+          <div class="team-sub">Всего авторов: ${team.authors_count}</div>
+        `;
+        item.addEventListener("click", () => selectTeam(team.team_id));
+        teamsList.appendChild(item);
+      });
+    }
+
+    async function loadGraph() {
+      if (!state.selectedPeriod) return;
+      const qs = new URLSearchParams({
+        period: state.selectedPeriod,
+        max_authors_per_doc: String(state.maxAuthorsPerDoc),
+        include_single_pub: state.includeSinglePub ? "true" : "false",
+      });
+      const data = await fetchJson(`/api/graph?${qs.toString()}`);
+      state.nodes = (data.nodes || []).map((n, idx) => ({
+        ...n,
+        idx,
+        label: fmtName(n),
+      }));
+      const indexById = new Map(state.nodes.map((n) => [n.id, n.idx]));
+      state.edges = (data.edges || []).map((e) => ({
+        ...e,
+        sourceIndex: indexById.get(e.source) ?? -1,
+        targetIndex: indexById.get(e.target) ?? -1,
+        pair: `${e.source}|${e.target}`,
+      }));
+      void buildGraph({ reloadData: true });
+    }
+
+    async function buildGraph({ reloadData = false } = {}) {
+      const container = document.getElementById("graph");
+      const sizeRange = [2 * state.nodeSizeScale, 14 * state.nodeSizeScale];
+      const widthRange = [0.2 * state.edgeWidthScale, 3 * state.edgeWidthScale];
+      const config = {
+        points: state.nodes,
+        pointIdBy: "id",
+        pointIndexBy: "idx",
+        pointLabelBy: "label",
+        pointSizeBy: "pubs",
+        pointSizeStrategy: "auto",
+        pointSizeRange: sizeRange,
+        pointColorBy: "id",
+        pointColorByFn: (id) => {
+          const status = state.teamMembers.get(String(id));
+          if (status === "core") return colors.core;
+          if (status === "periphery") return colors.periphery;
+          return colors.neutral;
+        },
+        links: state.edges,
+        linkSourceBy: "source",
+        linkTargetBy: "target",
+        linkSourceIndexBy: "sourceIndex",
+        linkTargetIndexBy: "targetIndex",
+        linkWidthBy: "weight",
+        linkWidthRange: widthRange,
+        linkWidthStrategy: "auto",
+        linkColorBy: "pair",
+        linkColorByFn: (pair) => {
+          if (!pair) return colors.link;
+          const [source, target] = String(pair).split("|");
+          return state.teamMembers.has(source) && state.teamMembers.has(target) ? colors.core : colors.link;
+        },
+        curvedLinks: true,
+        curvedLinkSegments: 19,
+        curvedLinkWeight: 0.4,
+        curvedLinkControlPointDistance: 0.45,
+        simulationGravity: state.simulation.gravity,
+        simulationRepulsion: state.simulation.repulsion,
+        simulationLinkSpring: state.simulation.linkStrength,
+        simulationLinkDistance: state.simulation.linkDistance,
+        simulationFriction: state.simulation.friction,
+        simulationRepulsionFromMouse: state.simulation.clusterRepulsion,
+        backgroundColor: "#ffffff",
+        unknownColor: colors.link,
+        preservePointPositionsOnDataUpdate: true,
+        selectPointOnClick: true,
+      };
+
+      if (!state.graph) {
+        state.graph = new Cosmograph(container, config);
+        state.controls.fit = new CosmographButtonFitView(state.graph, document.getElementById("fitControl"));
+        state.controls.zoom = new CosmographButtonZoomInOut(state.graph, document.getElementById("zoomControl"));
+        await state.graph.dataUploaded();
+      } else {
+        // Keep `points`/`links` in config on every update to avoid Cosmograph dropping local tables.
+        // When `points`/`links` references are unchanged, Cosmograph will update visual properties (e.g. colors)
+        // without re-uploading data.
+        await state.graph.setConfig(config);
+      }
+    }
+
+    function applyTeamHighlight() {
+      void buildGraph();
+    }
+
+    async function selectTeam(teamId) {
+      state.selectedTeam = teamId;
+      renderTeams();
+      if (!teamId) return;
+      teamTitle.textContent = `Команда #${teamId}`;
+      const data = await fetchJson(`/api/teams/${teamId}?period=${state.selectedPeriod}`);
+      renderAuthors(data.authors || []);
+      renderPublications(data.publications || []);
+      state.teamMembers = new Map();
+      (data.authors || []).forEach((a) => state.teamMembers.set(String(a.id), a.status || "core"));
+      applyTeamHighlight();
+    }
+
+    function renderAuthors(authors) {
+      authorsList.innerHTML = "";
+      if (!authors.length) {
+        authorsList.innerHTML = '<div class="empty">Авторы не найдены</div>';
+        return;
+      }
+      authors.forEach((a) => {
+        const item = document.createElement("div");
+        item.className = "author-row";
+        item.innerHTML = `
+          <div class="row">
+            <div class="name"><span class="dot ${a.status}"></span> ${fmtName(a)}</div>
+            <div class="status">${a.status}</div>
+          </div>
+        `;
+        authorsList.appendChild(item);
+      });
+    }
+
+    function renderPublications(pubs) {
+      pubsList.innerHTML = "";
+      if (!pubs.length) {
+        pubsList.innerHTML = '<div class="empty">Нет публикаций</div>';
+        return;
+      }
+      pubs.forEach((p) => {
+        const item = document.createElement("div");
+        item.className = "pub-row";
+        const authors = (p.authors || []).map((a) => `<span class="chip ${a.status}">${fmtName(a)}</span>`).join(" ");
+        item.innerHTML = `
+          <div class="pub-authors">${authors}</div>
+          <div class="pub-title">${p.title || "Без названия"}</div>
+          <div class="small">${p.year || "—"}</div>
+        `;
+        pubsList.appendChild(item);
+      });
+    }
+
+    function updateScales() {
+      state.nodeSizeScale = parseFloat(nodeSizeInput.value);
+      state.edgeWidthScale = parseFloat(edgeWidthInput.value);
+      applyTeamHighlight();
+    }
+
+    async function applySettingsValues() {
+      state.simulation.gravity = parseFloat(settingInputs.gravity.value);
+      state.simulation.repulsion = parseFloat(settingInputs.repulsion.value);
+      state.simulation.linkStrength = parseFloat(settingInputs.linkStrength.value);
+      state.simulation.linkDistance = parseFloat(settingInputs.linkDistance.value);
+      state.simulation.friction = parseFloat(settingInputs.friction.value);
+      state.simulation.clusterRepulsion = parseFloat(settingInputs.clusterRepulsion.value);
+      const prevMaxAuthors = state.maxAuthorsPerDoc;
+      state.maxAuthorsPerDoc = parseInt(settingInputs.maxAuthors.value, 10) || 0;
+      const prevIncludeSingle = state.includeSinglePub;
+      state.includeSinglePub = Boolean(settingInputs.includeSinglePub.checked);
+
+      if (state.maxAuthorsPerDoc !== prevMaxAuthors || state.includeSinglePub !== prevIncludeSingle) {
+        await loadGraph();
+        teamTitle.textContent = "–";
+        authorsList.innerHTML = "";
+        pubsList.innerHTML = "";
+        state.teamMembers.clear();
+        state.selectedTeam = null;
+        renderTeams();
+        return;
+      }
+
+      applyTeamHighlight();
+    }
+
+    function toggleModal(show) {
+      settingsModal.classList.toggle("active", show);
+    }
+
+    function toggleSimulation() {
+      if (!state.graph) return;
+      if (state.graph.isSimulationRunning) {
+        state.graph.pause();
+        playPauseBtn.textContent = "Запустить";
+      } else {
+        state.graph.unpause();
+        playPauseBtn.textContent = "Пауза";
+      }
+    }
+
+    periodSelect.addEventListener("change", async () => {
+      state.selectedPeriod = periodSelect.value;
+      if (state.graph) {
+        try {
+          await state.graph.destroy();
+        } catch (e) {
+          console.warn("[Teams Explorer] Failed to destroy graph", e);
+        }
+        state.graph = null;
+        state.controls.fit?.remove?.();
+        state.controls.zoom?.remove?.();
+        state.controls = {};
+        document.getElementById("fitControl").innerHTML = "";
+        document.getElementById("zoomControl").innerHTML = "";
+      }
+      await loadTeams();
+      await loadGraph();
+      teamTitle.textContent = "–";
+      authorsList.innerHTML = "";
+      pubsList.innerHTML = "";
+      state.teamMembers.clear();
+      state.selectedTeam = null;
+      renderTeams();
+    });
+
+    searchBtn.addEventListener("click", loadTeams);
+    clearSearchBtn.addEventListener("click", async () => {
+      authorSearch.value = "";
+      await loadTeams();
+      state.teamMembers.clear();
+      state.selectedTeam = null;
+      teamTitle.textContent = "–";
+      authorsList.innerHTML = "";
+      pubsList.innerHTML = "";
+      renderTeams();
+      applyTeamHighlight();
+      authorSearch.focus();
+    });
+    authorSearch.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") loadTeams();
+      if (e.key === "Escape") clearSearchBtn.click();
+    });
+
+    nodeSizeInput.addEventListener("input", updateScales);
+    edgeWidthInput.addEventListener("input", updateScales);
+    playPauseBtn.addEventListener("click", toggleSimulation);
+    settingsBtn.addEventListener("click", () => toggleModal(true));
+    closeSettings.addEventListener("click", () => toggleModal(false));
+    applySettings.addEventListener("click", async () => {
+      await applySettingsValues();
+      toggleModal(false);
+    });
+    settingsModal.addEventListener("click", (e) => {
+      if (e.target === settingsModal) toggleModal(false);
+    });
+
+    (async function init() {
+      await loadPeriods();
+      await loadTeams();
+      await loadGraph();
+      settingInputs.includeSinglePub.checked = state.includeSinglePub;
+    })();
+  </script>
+</body>
+</html>
