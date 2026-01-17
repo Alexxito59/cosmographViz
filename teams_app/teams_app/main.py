@@ -65,8 +65,12 @@ async def get_periods() -> JSONResponse:
 async def list_teams(
     period: str = Query(..., description="Sliding window period, e.g. 2023-2025"),
     query: str | None = Query(None, description="Filter teams by author name"),
+    min_team_size: int | None = Query(None, ge=1, description="Minimum team size (inclusive)."),
+    max_team_size: int | None = Query(None, ge=1, description="Maximum team size (inclusive)."),
 ) -> JSONResponse:
     _, _ = parse_period(period)
+    if min_team_size is not None and max_team_size is not None and min_team_size > max_team_size:
+        raise HTTPException(status_code=400, detail="Invalid team size range: min > max")
     query_param = f"%{query.lower()}%" if query else None
     sql = """
         WITH team_members AS (
@@ -88,15 +92,19 @@ async def list_teams(
             SELECT ts.*
             FROM team_stats ts
             WHERE
-                ? IS NULL
-                OR EXISTS (
-                    SELECT 1
-                    FROM team_members tm
-                    JOIN authors a ON a.id = tm.author_id
-                    WHERE tm.team_id = ts.team_id
-                        AND tm.period = ts.period
-                        AND LOWER(a.lastname || ' ' || COALESCE(a.givenname, '')) LIKE ?
+                (
+                    ? IS NULL
+                    OR EXISTS (
+                        SELECT 1
+                        FROM team_members tm
+                        JOIN authors a ON a.id = tm.author_id
+                        WHERE tm.team_id = ts.team_id
+                            AND tm.period = ts.period
+                            AND LOWER(a.lastname || ' ' || COALESCE(a.givenname, '')) LIKE ?
+                    )
                 )
+                AND (? IS NULL OR ts.authors_count >= ?)
+                AND (? IS NULL OR ts.authors_count <= ?)
         )
         SELECT
             ft.team_id,
@@ -122,7 +130,15 @@ async def list_teams(
         GROUP BY ft.team_id, ft.authors_count, ft.core_count, ft.periphery_count
         ORDER BY ft.team_id
     """
-    params: list[Any] = [period, query_param, query_param]
+    params: list[Any] = [
+        period,
+        query_param,
+        query_param,
+        min_team_size,
+        min_team_size,
+        max_team_size,
+        max_team_size,
+    ]
     with connect() as con:
         rows = con.execute(sql, params).fetchall()
     data = [
@@ -147,6 +163,8 @@ async def get_graph(
         le=2000,
         description="Exclude documents with more than this many authors (0 = no limit). Helps avoid huge cliques.",
     ),
+    min_team_size: int | None = Query(None, ge=1, description="Minimum team size (inclusive)."),
+    max_team_size: int | None = Query(None, ge=1, description="Maximum team size (inclusive)."),
     include_single_pub: bool = Query(
         False,
         description="Include authors with exactly 1 publication in the period (by default they are excluded).",
@@ -155,7 +173,21 @@ async def get_graph(
     start_year, end_year = parse_period(period)
     min_pubs = 1 if include_single_pub else 2
     sql = """
-        WITH period_docs AS (
+        WITH team_stats AS (
+            SELECT period, team_id, COUNT(*) AS authors_count
+            FROM teams
+            WHERE period = ?
+            GROUP BY period, team_id
+        ),
+        eligible_team_authors AS (
+            SELECT DISTINCT t.author_id
+            FROM teams t
+            JOIN team_stats ts ON ts.period = t.period AND ts.team_id = t.team_id
+            WHERE t.period = ?
+              AND (? IS NULL OR ts.authors_count >= ?)
+              AND (? IS NULL OR ts.authors_count <= ?)
+        ),
+        period_docs AS (
             SELECT eid, year
             FROM docs
             WHERE year BETWEEN ? AND ?
@@ -174,6 +206,7 @@ async def get_graph(
             SELECT dar.doc_id, dar.auth_id
             FROM doc_authors_raw dar
             JOIN doc_author_counts dac USING (doc_id)
+            JOIN eligible_team_authors eta ON eta.author_id = dar.auth_id
             WHERE (? = 0 OR dac.k <= ?)
         ),
         node_stats AS (
@@ -196,7 +229,21 @@ async def get_graph(
         ORDER BY fa.pubs DESC;
     """
     edges_sql = """
-        WITH period_docs AS (
+        WITH team_stats AS (
+            SELECT period, team_id, COUNT(*) AS authors_count
+            FROM teams
+            WHERE period = ?
+            GROUP BY period, team_id
+        ),
+        eligible_team_authors AS (
+            SELECT DISTINCT t.author_id
+            FROM teams t
+            JOIN team_stats ts ON ts.period = t.period AND ts.team_id = t.team_id
+            WHERE t.period = ?
+              AND (? IS NULL OR ts.authors_count >= ?)
+              AND (? IS NULL OR ts.authors_count <= ?)
+        ),
+        period_docs AS (
             SELECT eid, year
             FROM docs
             WHERE year BETWEEN ? AND ?
@@ -215,6 +262,7 @@ async def get_graph(
             SELECT dar.doc_id, dar.auth_id
             FROM doc_authors_raw dar
             JOIN doc_author_counts dac USING (doc_id)
+            JOIN eligible_team_authors eta ON eta.author_id = dar.auth_id
             WHERE (? = 0 OR dac.k <= ?)
         ),
         node_stats AS (
@@ -240,10 +288,36 @@ async def get_graph(
     """
     with connect() as con:
         node_rows = con.execute(
-            sql, [start_year, end_year, max_authors_per_doc, max_authors_per_doc, min_pubs]
+            sql,
+            [
+                period,
+                period,
+                min_team_size,
+                min_team_size,
+                max_team_size,
+                max_team_size,
+                start_year,
+                end_year,
+                max_authors_per_doc,
+                max_authors_per_doc,
+                min_pubs,
+            ],
         ).fetchall()
         edge_rows = con.execute(
-            edges_sql, [start_year, end_year, max_authors_per_doc, max_authors_per_doc, min_pubs]
+            edges_sql,
+            [
+                period,
+                period,
+                min_team_size,
+                min_team_size,
+                max_team_size,
+                max_team_size,
+                start_year,
+                end_year,
+                max_authors_per_doc,
+                max_authors_per_doc,
+                min_pubs,
+            ],
         ).fetchall()
     nodes = [
         {
