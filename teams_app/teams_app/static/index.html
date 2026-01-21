@@ -174,18 +174,6 @@
       width: 100%;
       height: 100%;
     }
-    #graphPlaceholder {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      z-index: 10;
-      pointer-events: none;
-    }
-    #graphPlaceholder.hidden {
-      display: none;
-    }
     .toolbar {
       position: absolute;
       top: 12px;
@@ -255,36 +243,6 @@
     .modal .control { margin-bottom: 10px; }
     .small { font-size: 12px; color: var(--muted); }
     .empty { color: var(--muted); text-align: center; margin-top: 16px; }
-    .placeholder {
-      width: 100%;
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 16px;
-      color: var(--muted);
-      background: linear-gradient(135deg, #f7f7f8 0%, #ffffff 100%);
-    }
-    .placeholder.hidden { display: none; }
-    .placeholder-icon {
-      font-size: 64px;
-      opacity: 0.3;
-    }
-    .placeholder-text {
-      font-size: 18px;
-      font-weight: 600;
-      color: var(--text);
-      opacity: 0.7;
-    }
-    .placeholder-hint {
-      font-size: 14px;
-      color: var(--muted);
-      max-width: 400px;
-      text-align: center;
-      line-height: 1.5;
-    }
-    .toolbar.hidden, .graph-controls.hidden { display: none; }
   </style>
 </head>
 <body>
@@ -324,12 +282,7 @@
 
     <main class="central">
       <div id="graph"></div>
-      <div id="graphPlaceholder" class="placeholder">
-        <div class="placeholder-icon">📊</div>
-        <div class="placeholder-text">Граф соавторства</div>
-        <div class="placeholder-hint">Выберите период в левой панели, чтобы загрузить граф</div>
-      </div>
-      <div class="toolbar hidden">
+      <div class="toolbar">
         <div class="block">
           <label for="nodeSize">Размер узлов</label>
           <input type="range" id="nodeSize" min="0.5" max="3" step="0.1" value="1.2" />
@@ -339,7 +292,7 @@
           <input type="range" id="edgeWidth" min="0.2" max="1.5" step="0.05" value="0.6" />
         </div>
       </div>
-      <div class="graph-controls hidden">
+      <div class="graph-controls">
         <div id="fitControl"></div>
         <div id="zoomControl"></div>
         <button id="playPause" class="floating-btn">Пауза</button>
@@ -385,7 +338,7 @@
       </div>
       <div class="control">
         <label for="friction">Friction</label>
-        <input type="range" id="friction" min="0.2" max="1.0" step="0.05" value="0.95" />
+        <input type="range" id="friction" min="0.2" max="1.0" step="0.05" value="0.85" />
       </div>
       <div class="control">
         <label for="clusterRepulsion">Cluster repulsion</label>
@@ -455,7 +408,6 @@
       periphery: "#1a5fb4",
       other: "#9a9a9a",
       link: "#d3d3dc",
-      environment: "#cc6600", // Тёмно-оранжевый для окружения (лучше виден на белом фоне)
     };
 
     const periodSelect = document.getElementById("periodSelect");
@@ -475,9 +427,6 @@
     const settingsBtn = document.getElementById("settingsBtn");
     const closeSettings = document.getElementById("closeSettings");
     const applySettings = document.getElementById("applySettings");
-    const graphPlaceholder = document.getElementById("graphPlaceholder");
-    const toolbar = document.querySelector(".toolbar");
-    const graphControls = document.querySelector(".graph-controls");
 
     const settingInputs = {
       gravity: document.getElementById("gravity"),
@@ -494,18 +443,6 @@
 
     function fmtName(item) {
       return [item.lastname, item.givenname].filter(Boolean).join(" ");
-    }
-
-    function showPlaceholder() {
-      graphPlaceholder?.classList.remove("hidden");
-      toolbar?.classList.add("hidden");
-      graphControls?.classList.add("hidden");
-    }
-
-    function hidePlaceholder() {
-      graphPlaceholder?.classList.add("hidden");
-      toolbar?.classList.remove("hidden");
-      graphControls?.classList.remove("hidden");
     }
 
     async function fetchJson(url) {
@@ -572,10 +509,7 @@
     }
 
     async function loadGraph() {
-      if (!state.selectedPeriod) {
-        showPlaceholder();
-        return;
-      }
+      if (!state.selectedPeriod) return;
       const qs = new URLSearchParams({
         period: state.selectedPeriod,
         max_authors_per_doc: String(state.maxAuthorsPerDoc),
@@ -601,50 +535,10 @@
       void buildGraph({ reloadData: true });
     }
 
-    async function loadTeamGraph(teamId) {
-      if (!state.selectedPeriod || !teamId) {
-        console.warn("[Teams Explorer] Cannot load team graph: missing period or teamId");
-        return;
-      }
-      try {
-        console.log(`[Teams Explorer] Loading graph for team ${teamId}, period ${state.selectedPeriod}`);
-        const qs = new URLSearchParams({
-          period: state.selectedPeriod,
-          max_authors_per_doc: String(state.maxAuthorsPerDoc),
-        });
-        const data = await fetchJson(`/api/teams/${teamId}/graph?${qs.toString()}`);
-        
-        const teamNodes = (data.nodes || []).filter((n) => n.status);
-        const envNodes = (data.nodes || []).filter((n) => !n.status);
-        console.log(`[Teams Explorer] Loaded ${teamNodes.length} team nodes, ${envNodes.length} environment nodes`);
-        
-        state.nodes = (data.nodes || []).map((n, idx) => ({
-          ...n,
-          idx,
-          label: fmtName(n),
-        }));
-        const indexById = new Map(state.nodes.map((n) => [n.id, n.idx]));
-        state.edges = (data.edges || []).map((e) => ({
-          ...e,
-          sourceIndex: indexById.get(e.source) ?? -1,
-          targetIndex: indexById.get(e.target) ?? -1,
-          pair: `${e.source}|${e.target}`,
-        }));
-        console.log(`[Teams Explorer] Loaded ${state.edges.length} edges`);
-        void buildGraph({ reloadData: true });
-      } catch (error) {
-        console.error(`[Teams Explorer] Error loading team graph:`, error);
-        throw error;
-      }
-    }
-
     async function buildGraph({ reloadData = false } = {}) {
       const container = document.getElementById("graph");
-      
-      // Единый диапазон размеров для всех узлов (независимо от команды/окружения)
       const sizeRange = [2 * state.nodeSizeScale, 14 * state.nodeSizeScale];
       const widthRange = [0.2 * state.edgeWidthScale, 3 * state.edgeWidthScale];
-      
       const config = {
         points: state.nodes,
         pointIdBy: "id",
@@ -655,18 +549,6 @@
         pointSizeRange: sizeRange,
         pointColorBy: "id",
         pointColorByFn: (id) => {
-          // Сначала проверяем статус из данных узла (для графа команды с окружением)
-          const node = state.nodes.find((n) => n.id === String(id));
-          if (node?.status) {
-            // Команда: зелёный для core, синий для periphery
-            if (node.status === "core") return colors.core;
-            if (node.status === "periphery") return colors.periphery;
-          }
-          // Окружение: жёлтый цвет
-          if (node && !node.status) {
-            return colors.environment;
-          }
-          // Затем проверяем teamMembers (для подсветки в полном графе)
           const status = state.teamMembers.get(String(id));
           if (status === "core") return colors.core;
           if (status === "periphery") return colors.periphery;
@@ -677,33 +559,14 @@
         linkTargetBy: "target",
         linkSourceIndexBy: "sourceIndex",
         linkTargetIndexBy: "targetIndex",
-        linkWidthBy: "enhancedWeight",
+        linkWidthBy: "weight",
         linkWidthRange: widthRange,
         linkWidthStrategy: "auto",
         linkColorBy: "pair",
         linkColorByFn: (pair) => {
           if (!pair) return colors.link;
           const [source, target] = String(pair).split("|");
-          const sourceNode = state.nodes.find((n) => n.id === source);
-          const targetNode = state.nodes.find((n) => n.id === target);
-          
-          // Если оба автора в команде (имеют status), зелёный цвет
-          if (sourceNode?.status && targetNode?.status) {
-            return colors.core;
-          }
-          // Если один в команде, другой в окружении, оранжевый
-          if ((sourceNode?.status && !targetNode?.status) || (!sourceNode?.status && targetNode?.status)) {
-            return colors.environment;
-          }
-          // Если оба в окружении, серый
-          if (!sourceNode?.status && !targetNode?.status) {
-            return colors.link;
-          }
-          // Для полного графа (старая логика)
-          if (state.teamMembers.has(source) && state.teamMembers.has(target)) {
-            return colors.core;
-          }
-          return colors.link;
+          return state.teamMembers.has(source) && state.teamMembers.has(target) ? colors.core : colors.link;
         },
         curvedLinks: true,
         curvedLinkSegments: 19,
@@ -726,13 +589,11 @@
         state.controls.fit = new CosmographButtonFitView(state.graph, document.getElementById("fitControl"));
         state.controls.zoom = new CosmographButtonZoomInOut(state.graph, document.getElementById("zoomControl"));
         await state.graph.dataUploaded();
-        hidePlaceholder();
       } else {
         // Keep `points`/`links` in config on every update to avoid Cosmograph dropping local tables.
         // When `points`/`links` references are unchanged, Cosmograph will update visual properties (e.g. colors)
         // without re-uploading data.
         await state.graph.setConfig(config);
-        hidePlaceholder();
       }
     }
 
@@ -743,38 +604,14 @@
     async function selectTeam(teamId) {
       state.selectedTeam = teamId;
       renderTeams();
-      if (!teamId) {
-        // Если команда не выбрана, уничтожаем граф и показываем заглушку
-        if (state.graph) {
-          try {
-            await state.graph.destroy();
-          } catch (e) {
-            console.warn("[Teams Explorer] Failed to destroy graph", e);
-          }
-          state.graph = null;
-          state.controls.fit?.remove?.();
-          state.controls.zoom?.remove?.();
-          state.controls = {};
-          document.getElementById("fitControl").innerHTML = "";
-          document.getElementById("zoomControl").innerHTML = "";
-        }
-        showPlaceholder();
-        teamTitle.textContent = "–";
-        authorsList.innerHTML = "";
-        pubsList.innerHTML = "";
-        state.teamMembers.clear();
-        state.nodes = [];
-        state.edges = [];
-        return;
-      }
+      if (!teamId) return;
       teamTitle.textContent = `Команда #${teamId}`;
       const data = await fetchJson(`/api/teams/${teamId}?period=${state.selectedPeriod}`);
       renderAuthors(data.authors || []);
       renderPublications(data.publications || []);
       state.teamMembers = new Map();
       (data.authors || []).forEach((a) => state.teamMembers.set(String(a.id), a.status || "core"));
-      // Загружаем граф команды вместо подсветки полного графа
-      await loadTeamGraph(teamId);
+      applyTeamHighlight();
     }
 
     function renderAuthors(authors) {
@@ -845,13 +682,7 @@
       state.includeSinglePub = Boolean(settingInputs.includeSinglePub.checked);
 
       if (state.maxAuthorsPerDoc !== prevMaxAuthors || state.includeSinglePub !== prevIncludeSingle) {
-        // Если выбрана команда, загружаем граф команды, иначе полный граф
-        if (state.selectedTeam) {
-          await loadTeamGraph(state.selectedTeam);
-        } else {
-          await loadGraph();
-        }
-        // Сбрасываем выбор команды только если изменились параметры фильтрации
+        await loadGraph();
         teamTitle.textContent = "–";
         authorsList.innerHTML = "";
         pubsList.innerHTML = "";
@@ -905,7 +736,6 @@
         state.controls = {};
         document.getElementById("fitControl").innerHTML = "";
         document.getElementById("zoomControl").innerHTML = "";
-        showPlaceholder();
       }
       await loadTeams();
       await loadGraph();
@@ -927,8 +757,7 @@
       authorsList.innerHTML = "";
       pubsList.innerHTML = "";
       renderTeams();
-      // Возвращаемся к полному графу
-      await loadGraph();
+      applyTeamHighlight();
       authorSearch.focus();
     });
     authorSearch.addEventListener("keydown", (e) => {
@@ -952,8 +781,13 @@
     (async function init() {
       await loadPeriods();
       await loadTeams();
+      await loadGraph();
       settingInputs.includeSinglePub.checked = state.includeSinglePub;
-      showPlaceholder();
+      settingInputs.minTeamSize.value = String(state.minTeamSize);
+      settingInputs.maxTeamSize.value = String(state.maxTeamSize);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/dece04bb-67fa-4135-9e5e-68260856c836',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.html:748',message:'init settings applied',data:{minTeamSize:state.minTeamSize,maxTeamSize:state.maxTeamSize,period:state.selectedPeriod},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H1'})}).catch(()=>{});
+      // #endregion
     })();
   </script>
 </body>
