@@ -132,6 +132,13 @@
     .dot.other { background: #a3a3a3; }
     .detail-section { flex: 1; display: flex; flex-direction: column; gap: 12px; }
     .split { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .stats-panel { flex: 0 0 auto; }
+    .stats-panel .list {
+      flex: 0 0 72px;
+      height: 72px;
+      max-height: 60px;
+      overflow: hidden;
+    }
     .row {
       display: flex;
       align-items: center;
@@ -302,6 +309,13 @@
           <button id="clearSearchBtn" style="background:#e9e9ee; color:#1f1f26; box-shadow:none;">Сброс</button>
         </div>
       </div>
+      <div class="control">
+        <label>Размер графа:</label>
+        <div>
+          <div class="small">Вершины: <span id="nodesCount">—</span></div>
+          <div class="small">Рёбра: <span id="edgesCount">—</span></div>
+        </div>
+      </div>
       <div class="split">
         <h2>Список команд</h2>
         <div id="teamsList" class="list"></div>
@@ -383,6 +397,13 @@
         <div class="small">0 = без ограничения (может взорвать число ребер из-за больших коллабораций)</div>
       </div>
       <div class="control">
+        <label>Размер команды (мин / макс)</label>
+        <div class="control-row">
+          <input id="minTeamSize" type="number" min="1" value="3" />
+          <input id="maxTeamSize" type="number" min="1" value="4" />
+        </div>
+      </div>
+      <div class="control">
         <label style="display:flex; align-items:center; gap:10px;">
           <input type="checkbox" id="includeSinglePub" />
           Показывать авторов с 1 публикацией
@@ -415,6 +436,8 @@
       nodeSizeScale: 1.2,
       edgeWidthScale: 0.6,
       maxAuthorsPerDoc: 100,
+      minTeamSize: 3,
+      maxTeamSize: 4,
       includeSinglePub: false,
       simulation: {
         gravity: 0.25,
@@ -428,7 +451,7 @@
 
     const colors = {
       neutral: "#d3d3dc",
-      core: "#1b7f3a",
+      core: "#00c853",
       periphery: "#1a5fb4",
       other: "#9a9a9a",
       link: "#d3d3dc",
@@ -443,6 +466,8 @@
     const authorsList = document.getElementById("authorsList");
     const pubsList = document.getElementById("pubsList");
     const teamTitle = document.getElementById("teamTitle");
+    const nodesCount = document.getElementById("nodesCount");
+    const edgesCount = document.getElementById("edgesCount");
     const nodeSizeInput = document.getElementById("nodeSize");
     const edgeWidthInput = document.getElementById("edgeWidth");
     const playPauseBtn = document.getElementById("playPause");
@@ -462,6 +487,8 @@
       friction: document.getElementById("friction"),
       clusterRepulsion: document.getElementById("clusterRepulsion"),
       maxAuthors: document.getElementById("maxAuthors"),
+      minTeamSize: document.getElementById("minTeamSize"),
+      maxTeamSize: document.getElementById("maxTeamSize"),
       includeSinglePub: document.getElementById("includeSinglePub"),
     };
 
@@ -506,7 +533,11 @@
     async function loadTeams() {
       if (!state.selectedPeriod) return;
       const query = authorSearch.value.trim();
-      const qs = new URLSearchParams({ period: state.selectedPeriod });
+      const qs = new URLSearchParams({
+        period: state.selectedPeriod,
+        min_team_size: String(state.minTeamSize),
+        max_team_size: String(state.maxTeamSize),
+      });
       if (query) qs.set("query", query);
       const data = await fetchJson(`/api/teams?${qs.toString()}`);
       state.teams = data.teams || [];
@@ -548,6 +579,8 @@
       const qs = new URLSearchParams({
         period: state.selectedPeriod,
         max_authors_per_doc: String(state.maxAuthorsPerDoc),
+        min_team_size: String(state.minTeamSize),
+        max_team_size: String(state.maxTeamSize),
         include_single_pub: state.includeSinglePub ? "true" : "false",
       });
       const data = await fetchJson(`/api/graph?${qs.toString()}`);
@@ -563,6 +596,8 @@
         targetIndex: indexById.get(e.target) ?? -1,
         pair: `${e.source}|${e.target}`,
       }));
+      nodesCount.textContent = String(state.nodes.length);
+      edgesCount.textContent = String(state.edges.length);
       void buildGraph({ reloadData: true });
     }
 
@@ -795,6 +830,17 @@
       state.simulation.clusterRepulsion = parseFloat(settingInputs.clusterRepulsion.value);
       const prevMaxAuthors = state.maxAuthorsPerDoc;
       state.maxAuthorsPerDoc = parseInt(settingInputs.maxAuthors.value, 10) || 0;
+      const prevMinTeamSize = state.minTeamSize;
+      const prevMaxTeamSize = state.maxTeamSize;
+      state.minTeamSize = parseInt(settingInputs.minTeamSize.value, 10) || 1;
+      state.maxTeamSize = parseInt(settingInputs.maxTeamSize.value, 10) || state.minTeamSize;
+      if (state.minTeamSize > state.maxTeamSize) {
+        state.maxTeamSize = state.minTeamSize;
+        settingInputs.maxTeamSize.value = String(state.maxTeamSize);
+      }
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/dece04bb-67fa-4135-9e5e-68260856c836',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.html:680',message:'applySettingsValues team size',data:{minTeamSize:state.minTeamSize,maxTeamSize:state.maxTeamSize},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H2'})}).catch(()=>{});
+      // #endregion
       const prevIncludeSingle = state.includeSinglePub;
       state.includeSinglePub = Boolean(settingInputs.includeSinglePub.checked);
 
@@ -806,6 +852,18 @@
           await loadGraph();
         }
         // Сбрасываем выбор команды только если изменились параметры фильтрации
+        teamTitle.textContent = "–";
+        authorsList.innerHTML = "";
+        pubsList.innerHTML = "";
+        state.teamMembers.clear();
+        state.selectedTeam = null;
+        renderTeams();
+        return;
+      }
+
+      if (state.minTeamSize !== prevMinTeamSize || state.maxTeamSize !== prevMaxTeamSize) {
+        await loadTeams();
+        await loadGraph();
         teamTitle.textContent = "–";
         authorsList.innerHTML = "";
         pubsList.innerHTML = "";
