@@ -1,26 +1,71 @@
-# cosmographViz
+# LIS Teams Explorer
 
-Небольшой веб-интерфейс для просмотра команд/графа соавторства из `lis.duckdb`.
+Веб-интерфейс для визуализации графа соавторства и анализа команд исследователей на основе данных из DuckDB.
 
-## Быстрый старт
+## Требования
+
+- Python 3.8 или выше
+- База данных `lis.duckdb` в корне проекта
+
+## Установка
+
+Установите зависимости проекта:
 
 ```bash
 pip install -r requirements.txt
+```
+
+## Запуск сервера
+
+Запустите веб-сервер с помощью uvicorn:
+
+```bash
 python -m uvicorn teams_app.teams_app.main:app --reload --port 8000
 ```
 
-Открыть в браузере: `http://127.0.0.1:8000`
+Сервер будет доступен по адресу: `http://127.0.0.1:8000`
 
-## Где фронтенд
+### Параметры запуска
 
-Фронтенд находится в `teams_app/teams_app/static/index.html` — это одна HTML‑страница
-со встроенным CSS и JavaScript. Логика на клиенте делает запросы к API:
+- `--reload` — автоматическая перезагрузка при изменении кода (для разработки)
+- `--port 8000` — порт сервера (можно изменить на любой другой)
 
-- `GET /api/periods`
-- `GET /api/teams?period=...&query=...`
-- `GET /api/graph?period=...`
-- `GET /api/teams/{team_id}?period=...`
+### Запуск на другом порту
+
+```bash
+python -m uvicorn teams_app.teams_app.main:app --reload --port 8080
+```
+
+### Запуск без автоперезагрузки (production)
+
+```bash
+python -m uvicorn teams_app.teams_app.main:app --host 0.0.0.0 --port 8000
+```
 
 ## База данных
 
-Сервер использует `lis.duckdb` в корне проекта в режиме read‑only.
+Сервер использует базу данных `lis.duckdb`, которая должна находиться в корне проекта. База данных открывается в режиме read-only.
+
+Если база данных отсутствует, сервер вернет ошибку при попытке подключения.
+
+## Структура проекта
+
+```
+cosmographViz/
+├── teams_app/
+│   └── teams_app/
+│       ├── main.py              # Backend (FastAPI)
+│       └── static/
+│           └── index.html       # Frontend (одностраничное приложение)
+├── lis.duckdb                   # База данных
+├── requirements.txt             # Зависимости Python
+└── README.md                    # Этот файл
+```
+
+## API Endpoints
+
+- `GET /api/periods` — список доступных периодов
+- `GET /api/teams?period=...&query=...` — список команд с фильтрацией
+- `GET /api/graph?period=...` — данные графа для периода
+- `GET /api/teams/{team_id}?period=...` — информация о команде
+- `GET /api/teams/{team_id}/graph?period=...` — граф команды с окружением
