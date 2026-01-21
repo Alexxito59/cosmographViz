@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+
+logger = logging.getLogger(__name__)
 
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = APP_DIR.parent.parent
@@ -359,3 +362,175 @@ async def get_team_detail(
         "publications": sorted(publications.values(), key=lambda p: (p["year"] or 0, p["doc_id"]), reverse=True),
     }
     return JSONResponse(response)
+
+
+@app.get("/api/teams/{team_id}/graph")
+async def get_team_graph(
+    team_id: int,
+    period: str = Query(..., description="Sliding window period for the team"),
+    max_authors_per_doc: int = Query(
+        100,
+        ge=0,
+        le=2000,
+        description="Exclude documents with more than this many authors (0 = no limit).",
+    ),
+) -> JSONResponse:
+    try:
+        logger.info(f"Loading graph for team {team_id}, period {period}")
+        start_year, end_year = parse_period(period)
+        
+        # SQL для получения узлов: команда + окружение
+        nodes_sql = """
+            WITH team_members AS (
+                SELECT author_id, status
+                FROM teams
+                WHERE period = ? AND team_id = ?
+            ),
+            period_docs AS (
+                SELECT eid, year
+                FROM docs
+                WHERE year BETWEEN ? AND ?
+            ),
+            -- Находим все публикации команды
+            team_docs AS (
+                SELECT DISTINCT d.eid AS doc_id
+                FROM period_docs d
+                JOIN auth_doc ad ON ad.doc_id = d.eid
+                JOIN team_members tm ON tm.author_id = ad.auth_id
+            ),
+            -- Находим всех авторов публикаций команды (включая не из команды)
+            doc_authors_raw AS (
+                SELECT DISTINCT td.doc_id, ad.auth_id
+                FROM team_docs td
+                JOIN auth_doc ad ON ad.doc_id = td.doc_id
+            ),
+            doc_author_counts AS (
+                SELECT doc_id, COUNT(*) AS k
+                FROM doc_authors_raw
+                GROUP BY doc_id
+            ),
+            doc_authors AS (
+                SELECT dar.doc_id, dar.auth_id
+                FROM doc_authors_raw dar
+                JOIN doc_author_counts dac USING (doc_id)
+                WHERE (? = 0 OR dac.k <= ?)
+            ),
+            -- Статистика по узлам: команда (со статусом) и окружение (без статуса)
+            node_stats AS (
+                SELECT 
+                    da.auth_id,
+                    COUNT(DISTINCT da.doc_id) AS pubs,
+                    MAX(tm.status) AS status
+                FROM doc_authors da
+                LEFT JOIN team_members tm ON tm.author_id = da.auth_id
+                GROUP BY da.auth_id
+            )
+            SELECT
+                ns.auth_id,
+                a.lastname,
+                a.givenname,
+                ns.pubs,
+                ns.status
+            FROM node_stats ns
+            LEFT JOIN authors a ON a.id = ns.auth_id
+            ORDER BY ns.status IS NULL, ns.pubs DESC;
+        """
+        
+        # SQL для получения рёбер: внутри команды, команда-окружение, внутри окружения
+        edges_sql = """
+            WITH team_members AS (
+                SELECT author_id, status
+                FROM teams
+                WHERE period = ? AND team_id = ?
+            ),
+            period_docs AS (
+                SELECT eid, year
+                FROM docs
+                WHERE year BETWEEN ? AND ?
+            ),
+            -- Находим все публикации команды
+            team_docs AS (
+                SELECT DISTINCT d.eid AS doc_id
+                FROM period_docs d
+                JOIN auth_doc ad ON ad.doc_id = d.eid
+                JOIN team_members tm ON tm.author_id = ad.auth_id
+            ),
+            -- Находим всех авторов публикаций команды
+            doc_authors_raw AS (
+                SELECT DISTINCT td.doc_id, ad.auth_id
+                FROM team_docs td
+                JOIN auth_doc ad ON ad.doc_id = td.doc_id
+            ),
+            doc_author_counts AS (
+                SELECT doc_id, COUNT(*) AS k
+                FROM doc_authors_raw
+                GROUP BY doc_id
+            ),
+            doc_authors AS (
+                SELECT dar.doc_id, dar.auth_id
+                FROM doc_authors_raw dar
+                JOIN doc_author_counts dac USING (doc_id)
+                WHERE (? = 0 OR dac.k <= ?)
+            )
+            -- Рёбра: все связи между авторами публикаций команды
+            SELECT
+                LEAST(a1.auth_id, a2.auth_id) AS source,
+                GREATEST(a1.auth_id, a2.auth_id) AS target,
+                COUNT(DISTINCT a1.doc_id) AS weight
+            FROM doc_authors a1
+            JOIN doc_authors a2
+                ON a1.doc_id = a2.doc_id AND a1.auth_id < a2.auth_id
+            GROUP BY source, target;
+        """
+        
+        with connect() as con:
+            logger.debug(f"Executing nodes query for team {team_id}")
+            node_rows = con.execute(
+                nodes_sql, [period, team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
+            ).fetchall()
+            logger.debug(f"Found {len(node_rows)} nodes")
+            
+            logger.debug(f"Executing edges query for team {team_id}")
+            edge_rows = con.execute(
+                edges_sql, [period, team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
+            ).fetchall()
+            logger.debug(f"Found {len(edge_rows)} edges")
+        
+        nodes = []
+        team_count = 0
+        environment_count = 0
+        
+        for row in node_rows:
+            auth_id = str(row[0])
+            status = row[4]  # status может быть None для окружения
+            
+            node = {
+                "id": auth_id,
+                "lastname": row[1] or "",
+                "givenname": row[2] or "",
+                "pubs": int(row[3]),
+                "status": status or None,  # None для окружения
+            }
+            nodes.append(node)
+            
+            if status:
+                team_count += 1
+            else:
+                environment_count += 1
+        
+        logger.info(f"Team {team_id}: {team_count} team members, {environment_count} environment nodes")
+        
+        edges = [
+            {
+                "source": str(row[0]),
+                "target": str(row[1]),
+                "weight": int(row[2]),
+            }
+            for row in edge_rows
+        ]
+        
+        return JSONResponse({"nodes": nodes, "edges": edges})
+        
+    except Exception as e:
+        logger.error(f"Error loading graph for team {team_id}, period {period}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to load team graph: {str(e)}")
