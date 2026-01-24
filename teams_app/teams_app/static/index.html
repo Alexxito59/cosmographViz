@@ -563,7 +563,7 @@
         targetIndex: indexById.get(e.target) ?? -1,
         pair: `${e.source}|${e.target}`,
       }));
-      void buildGraph({ reloadData: true });
+      await buildGraph({ reloadData: true });
     }
 
     async function loadTeamGraph(teamId) {
@@ -596,7 +596,7 @@
           pair: `${e.source}|${e.target}`,
         }));
         console.log(`[Teams Explorer] Loaded ${state.edges.length} edges`);
-        void buildGraph({ reloadData: true });
+        await buildGraph({ reloadData: true });
       } catch (error) {
         console.error(`[Teams Explorer] Error loading team graph:`, error);
         throw error;
@@ -642,7 +642,7 @@
         linkTargetBy: "target",
         linkSourceIndexBy: "sourceIndex",
         linkTargetIndexBy: "targetIndex",
-        linkWidthBy: "enhancedWeight",
+        linkWidthBy: "weight",
         linkWidthRange: widthRange,
         linkWidthStrategy: "auto",
         linkColorBy: "pair",
@@ -697,6 +697,9 @@
         // When `points`/`links` references are unchanged, Cosmograph will update visual properties (e.g. colors)
         // without re-uploading data.
         await state.graph.setConfig(config);
+        if (reloadData) {
+          await state.graph.dataUploaded();
+        }
         hidePlaceholder();
       }
     }
