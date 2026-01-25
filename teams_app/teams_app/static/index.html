@@ -287,6 +287,54 @@
       color: var(--muted);
       font-size: 12px;
     }
+    .node-info-actions {
+      display: flex;
+      justify-content: flex-start;
+      margin-top: 10px;
+    }
+    .node-info-actions .btn {
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 600;
+      box-shadow: var(--shadow);
+    }
+    .node-teams {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .node-teams.hidden { display: none; }
+    .node-teams .row-item {
+      padding: 10px 10px;
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      gap: 4px;
+    }
+    .node-teams .row-item:last-child { border-bottom: none; }
+    .node-teams .row-item .topline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .node-teams .row-item .subline {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.3;
+    }
+    .node-teams .muted {
+      padding: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
     .placeholder {
       width: 100%;
       height: 100%;
@@ -436,10 +484,17 @@
 
   <div id="nodeInfoModal" class="modal">
     <div class="modal-card">
-      <h3>Информация об авторе</h3>
+      <div class="row" style="align-items:center; justify-content: space-between; gap: 10px;">
+        <h3 style="margin: 0;">Информация об авторе</h3>
+        <button id="hideNodeInfoBtn" class="floating-btn" type="button" style="padding: 8px 10px; box-shadow: none;">Скрыть</button>
+      </div>
       <div class="node-info">
         <div id="nodeInfoLabel" class="value">–</div>
         <div id="nodeInfoMeta" class="meta"></div>
+        <div class="node-info-actions">
+          <button id="nodeTeamsBtn" class="btn" type="button">Показать список команд автора</button>
+        </div>
+        <div id="nodeTeams" class="node-teams hidden"></div>
       </div>
     </div>
   </div>
@@ -502,10 +557,20 @@
     const nodeInfoModal = document.getElementById("nodeInfoModal");
     const nodeInfoLabel = document.getElementById("nodeInfoLabel");
     const nodeInfoMeta = document.getElementById("nodeInfoMeta");
+    const hideNodeInfoBtn = document.getElementById("hideNodeInfoBtn");
+    const nodeTeamsBtn = document.getElementById("nodeTeamsBtn");
+    const nodeTeams = document.getElementById("nodeTeams");
     const graphPlaceholder = document.getElementById("graphPlaceholder");
     const toolbar = document.querySelector(".toolbar");
     const graphControls = document.querySelector(".graph-controls");
-    let nodeInfoAutoCloseTimer = null;
+    const nodeTeamsState = {
+      authorId: null,
+      period: null,
+      isOpen: false,
+      isLoading: false,
+      error: null,
+      teams: [],
+    };
 
     const settingInputs = {
       gravity: document.getElementById("gravity"),
@@ -536,9 +601,85 @@
 
     function toggleNodeInfo(show) {
       nodeInfoModal?.classList.toggle("active", show);
-      if (!show && nodeInfoAutoCloseTimer) {
-        window.clearTimeout(nodeInfoAutoCloseTimer);
-        nodeInfoAutoCloseTimer = null;
+      if (!show) {
+        // Free memory from previously rendered content
+        nodeInfoLabel.textContent = "–";
+        nodeInfoMeta.textContent = "";
+        nodeTeams.innerHTML = "";
+
+        nodeTeamsState.authorId = null;
+        nodeTeamsState.period = null;
+        nodeTeamsState.isOpen = false;
+        nodeTeamsState.isLoading = false;
+        nodeTeamsState.error = null;
+        nodeTeamsState.teams = [];
+        renderNodeTeams();
+      }
+    }
+
+    function renderNodeTeams() {
+      const shouldShow = Boolean(nodeTeamsState.isOpen);
+      nodeTeams.classList.toggle("hidden", !shouldShow);
+      nodeTeamsBtn.textContent = nodeTeamsState.isOpen ? "Скрыть список команд автора" : "Показать список команд автора";
+      if (!shouldShow) {
+        nodeTeams.innerHTML = "";
+        return;
+      }
+      if (!state.selectedPeriod) {
+        nodeTeams.innerHTML = '<div class="muted">Сначала выберите период.</div>';
+        return;
+      }
+      if (nodeTeamsState.isLoading) {
+        nodeTeams.innerHTML = '<div class="muted">Загрузка…</div>';
+        return;
+      }
+      if (nodeTeamsState.error) {
+        nodeTeams.innerHTML = `<div class="muted">Ошибка: ${nodeTeamsState.error}</div>`;
+        return;
+      }
+      if (!nodeTeamsState.teams.length) {
+        nodeTeams.innerHTML = '<div class="muted">Команды за выбранный период не найдены.</div>';
+        return;
+      }
+      nodeTeams.innerHTML = nodeTeamsState.teams
+        .map((t) => {
+          const status = t.author_status || "core";
+          return `
+            <div class="row-item">
+              <div class="topline">
+                <div>Команда #${t.team_id}</div>
+                <div class="small">${status}</div>
+              </div>
+              <div class="subline">${t.sample_authors || "—"}</div>
+              <div class="subline">Всего авторов: ${t.authors_count} • core: ${t.core_count} • periphery: ${t.periphery_count}</div>
+            </div>
+          `;
+        })
+        .join("");
+    }
+
+    async function loadAuthorTeams(authorId) {
+      if (!authorId || !state.selectedPeriod) return;
+      const period = state.selectedPeriod;
+      if (nodeTeamsState.isLoading) return;
+      // Avoid refetch if already loaded for same author+period
+      if (nodeTeamsState.authorId === String(authorId) && nodeTeamsState.period === period && nodeTeamsState.teams.length) {
+        return;
+      }
+      nodeTeamsState.isLoading = true;
+      nodeTeamsState.error = null;
+      nodeTeamsState.teams = [];
+      renderNodeTeams();
+      try {
+        const data = await fetchJson(`/api/authors/${encodeURIComponent(String(authorId))}/teams?period=${encodeURIComponent(period)}`);
+        nodeTeamsState.authorId = String(authorId);
+        nodeTeamsState.period = period;
+        nodeTeamsState.teams = data.teams || [];
+      } catch (e) {
+        nodeTeamsState.error = e?.message || String(e);
+      } finally {
+        nodeTeamsState.isLoading = false;
+        renderNodeTeams();
       }
     }
 
@@ -559,8 +700,13 @@
       if (node.status) meta.push(`статус: ${node.status}`);
       nodeInfoMeta.textContent = meta.join(" • ");
       toggleNodeInfo(true);
-      if (nodeInfoAutoCloseTimer) window.clearTimeout(nodeInfoAutoCloseTimer);
-      nodeInfoAutoCloseTimer = window.setTimeout(() => toggleNodeInfo(false), 15000);
+      nodeTeamsState.authorId = String(node.id ?? "");
+      nodeTeamsState.period = state.selectedPeriod;
+      nodeTeamsState.isOpen = false;
+      nodeTeamsState.isLoading = false;
+      nodeTeamsState.error = null;
+      nodeTeamsState.teams = [];
+      renderNodeTeams();
     }
 
     async function fetchJson(url) {
@@ -983,6 +1129,16 @@
     settingsModal.addEventListener("click", (e) => {
       if (e.target === settingsModal) toggleModal(false);
     });
+
+    nodeTeamsBtn.addEventListener("click", async () => {
+      nodeTeamsState.isOpen = !nodeTeamsState.isOpen;
+      renderNodeTeams();
+      if (nodeTeamsState.isOpen) {
+        await loadAuthorTeams(nodeTeamsState.authorId);
+      }
+    });
+
+    hideNodeInfoBtn.addEventListener("click", () => toggleNodeInfo(false));
 
     (async function init() {
       await loadPeriods();
