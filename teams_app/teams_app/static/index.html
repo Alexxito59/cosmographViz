@@ -145,6 +145,7 @@
       background: #fff;
       margin-bottom: 8px;
     }
+    .author-row { cursor: pointer; }
     .author-row .name { font-weight: 600; }
     .author-row .status { font-size: 12px; color: var(--muted); }
     .pub-authors { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
@@ -166,6 +167,27 @@
     #graph {
       width: 100%;
       height: 100%;
+    }
+    .focus-ring-overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 1; /* above canvas, below toolbars (z=2) */
+    }
+    .focus-ring-overlay.hidden { display: none; }
+    .focus-ring-circle {
+      fill: none;
+      stroke: #000;
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      stroke-dasharray: 10 8;
+      animation: focusDash 1.1s linear infinite;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.18));
+    }
+    @keyframes focusDash {
+      to { stroke-dashoffset: -36; }
     }
     #graphPlaceholder {
       position: absolute;
@@ -397,6 +419,9 @@
 
     <main class="central">
       <div id="graph"></div>
+      <svg id="focusRingOverlay" class="focus-ring-overlay hidden" aria-hidden="true">
+        <circle id="focusRingCircle" class="focus-ring-circle" cx="-10" cy="-10" r="0"></circle>
+      </svg>
       <div id="graphPlaceholder" class="placeholder">
         <div class="placeholder-icon">📊</div>
         <div class="placeholder-text">Граф соавторства</div>
@@ -513,6 +538,7 @@
       selectedTeam: null,
       nodes: [],
       edges: [],
+      nodeIndexById: new Map(),
       teamMembers: new Map(),
       graph: null,
       controls: {},
@@ -520,6 +546,7 @@
       edgeWidthScale: 0.6,
       maxAuthorsPerDoc: 100,
       includeSinglePub: false,
+      focusedPointIndex: null,
       simulation: {
         gravity: 0.25,
         repulsion: 1.0,
@@ -563,6 +590,9 @@
     const graphPlaceholder = document.getElementById("graphPlaceholder");
     const toolbar = document.querySelector(".toolbar");
     const graphControls = document.querySelector(".graph-controls");
+    const focusRingOverlay = document.getElementById("focusRingOverlay");
+    const focusRingCircle = document.getElementById("focusRingCircle");
+    let focusRingRaf = null;
     const nodeTeamsState = {
       authorId: null,
       period: null,
@@ -784,6 +814,8 @@
         idx,
         label: fmtName(n),
       }));
+      state.nodeIndexById = new Map(state.nodes.map((n) => [String(n.id), n.idx]));
+      state.focusedPointIndex = null;
       const indexById = new Map(state.nodes.map((n) => [n.id, n.idx]));
       state.edges = (data.edges || []).map((e) => ({
         ...e,
@@ -816,6 +848,8 @@
           idx,
           label: fmtName(n),
         }));
+        state.nodeIndexById = new Map(state.nodes.map((n) => [String(n.id), n.idx]));
+        state.focusedPointIndex = null;
         const indexById = new Map(state.nodes.map((n) => [n.id, n.idx]));
         state.edges = (data.edges || []).map((e) => ({
           ...e,
@@ -829,6 +863,48 @@
         console.error(`[Teams Explorer] Error loading team graph:`, error);
         throw error;
       }
+    }
+
+    function focusPointByAuthorId(authorId) {
+      const idx = state.nodeIndexById.get(String(authorId));
+      if (typeof idx !== "number") return;
+      // Toggle: clicking the same author again removes focus/boost
+      state.focusedPointIndex = state.focusedPointIndex === idx ? null : idx;
+      updateFocusRing();
+      void buildGraph();
+    }
+
+    function updateFocusRing() {
+      const show = typeof state.focusedPointIndex === "number" && Boolean(state.graph);
+      focusRingOverlay?.classList.toggle("hidden", !show);
+      if (!show) {
+        if (focusRingRaf) cancelAnimationFrame(focusRingRaf);
+        focusRingRaf = null;
+        return;
+      }
+
+      const tick = () => {
+        if (!state.graph || typeof state.focusedPointIndex !== "number") {
+          focusRingOverlay?.classList.add("hidden");
+          focusRingRaf = null;
+          return;
+        }
+        const index = state.focusedPointIndex;
+        const spacePos = state.graph.getPointPositionByIndex(index);
+        const screenPos = spacePos ? state.graph.spaceToScreenPosition(spacePos) : undefined;
+        const baseR = state.graph.getPointScreenRadiusByIndex(index);
+        if (!screenPos || !Number.isFinite(baseR)) {
+          focusRingRaf = requestAnimationFrame(tick);
+          return;
+        }
+        const [x, y] = screenPos;
+        const r = (baseR || 0) * 1.5 + 6; // ~1.5x radius + padding
+        focusRingCircle?.setAttribute("cx", String(x));
+        focusRingCircle?.setAttribute("cy", String(y));
+        focusRingCircle?.setAttribute("r", String(r));
+        focusRingRaf = requestAnimationFrame(tick);
+      };
+      if (!focusRingRaf) focusRingRaf = requestAnimationFrame(tick);
     }
 
     async function buildGraph({ reloadData = false } = {}) {
@@ -912,6 +988,9 @@
         unknownColor: colors.link,
         preservePointPositionsOnDataUpdate: true,
         selectPointOnClick: true,
+        // Disable built-in focus ring; we draw our own animated ring overlay
+        focusPointOnClick: false,
+        focusPointOnLabelClick: false,
         onPointClick: (index) => {
           if (typeof index !== "number") return;
           showNodeInfoByIndex(index);
@@ -928,6 +1007,7 @@
         state.controls.zoom = new CosmographButtonZoomInOut(state.graph, document.getElementById("zoomControl"));
         await state.graph.dataUploaded();
         hidePlaceholder();
+        updateFocusRing();
       } else {
         // Keep `points`/`links` in config on every update to avoid Cosmograph dropping local tables.
         // When `points`/`links` references are unchanged, Cosmograph will update visual properties (e.g. colors)
@@ -937,6 +1017,7 @@
           await state.graph.dataUploaded();
         }
         hidePlaceholder();
+        updateFocusRing();
       }
     }
 
@@ -996,6 +1077,7 @@
             <div class="status">${a.status}</div>
           </div>
         `;
+        item.addEventListener("click", () => focusPointByAuthorId(a.id));
         authorsList.appendChild(item);
       });
     }
