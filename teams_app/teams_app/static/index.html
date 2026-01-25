@@ -244,10 +244,49 @@
       box-shadow: var(--shadow);
       border: 1px solid var(--border);
     }
+    .modal-card.wide {
+      width: 520px;
+      max-width: calc(100vw - 32px);
+    }
+    /* Info toast: inside graph area (avoid right panel), no overlay, doesn't block graph */
+    #nodeInfoModal {
+      inset: auto;
+      /* right panel is 340px in the layout grid; shift left by it */
+      top: 60px; /* below top-right controls ("Запустить") */
+      right: calc(340px + 12px);
+      background: transparent;
+      align-items: flex-start;
+      justify-content: flex-end;
+      pointer-events: none; /* clicks pass through */
+      z-index: 9; /* below global modal (10), above graph controls (2) */
+    }
+    #nodeInfoModal.active { display: flex; }
+    #nodeInfoModal .modal-card {
+      width: 360px;
+      max-width: calc(100vw - 24px);
+      pointer-events: auto; /* clickable if needed */
+    }
     .modal h3 { margin: 0 0 12px 0; }
     .modal .control { margin-bottom: 10px; }
     .small { font-size: 12px; color: var(--muted); }
     .empty { color: var(--muted); text-align: center; margin-top: 16px; }
+    .node-info {
+      display: grid;
+      gap: 8px;
+    }
+    .node-info .value {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+      word-break: break-word;
+    }
+    .node-info .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
     .placeholder {
       width: 100%;
       height: 100%;
@@ -395,6 +434,16 @@
     </div>
   </div>
 
+  <div id="nodeInfoModal" class="modal">
+    <div class="modal-card">
+      <h3>Информация об авторе</h3>
+      <div class="node-info">
+        <div id="nodeInfoLabel" class="value">–</div>
+        <div id="nodeInfoMeta" class="meta"></div>
+      </div>
+    </div>
+  </div>
+
   <script type="module">
     import {
       Cosmograph,
@@ -450,9 +499,13 @@
     const settingsBtn = document.getElementById("settingsBtn");
     const closeSettings = document.getElementById("closeSettings");
     const applySettings = document.getElementById("applySettings");
+    const nodeInfoModal = document.getElementById("nodeInfoModal");
+    const nodeInfoLabel = document.getElementById("nodeInfoLabel");
+    const nodeInfoMeta = document.getElementById("nodeInfoMeta");
     const graphPlaceholder = document.getElementById("graphPlaceholder");
     const toolbar = document.querySelector(".toolbar");
     const graphControls = document.querySelector(".graph-controls");
+    let nodeInfoAutoCloseTimer = null;
 
     const settingInputs = {
       gravity: document.getElementById("gravity"),
@@ -479,6 +532,35 @@
       graphPlaceholder?.classList.add("hidden");
       toolbar?.classList.remove("hidden");
       graphControls?.classList.remove("hidden");
+    }
+
+    function toggleNodeInfo(show) {
+      nodeInfoModal?.classList.toggle("active", show);
+      if (!show && nodeInfoAutoCloseTimer) {
+        window.clearTimeout(nodeInfoAutoCloseTimer);
+        nodeInfoAutoCloseTimer = null;
+      }
+    }
+
+    function getNodeByCosmographIndex(index) {
+      // Cosmograph passes internal point index; in our data it's `idx` but be defensive.
+      const direct = state.nodes[index];
+      if (direct && direct.idx === index) return direct;
+      return state.nodes.find((n) => n.idx === index);
+    }
+
+    function showNodeInfoByIndex(index) {
+      const node = getNodeByCosmographIndex(index);
+      if (!node) return;
+      nodeInfoLabel.textContent = node.label || "—";
+      const meta = [];
+      if (node.id != null) meta.push(`id: ${node.id}`);
+      if (node.pubs != null) meta.push(`публикаций: ${node.pubs}`);
+      if (node.status) meta.push(`статус: ${node.status}`);
+      nodeInfoMeta.textContent = meta.join(" • ");
+      toggleNodeInfo(true);
+      if (nodeInfoAutoCloseTimer) window.clearTimeout(nodeInfoAutoCloseTimer);
+      nodeInfoAutoCloseTimer = window.setTimeout(() => toggleNodeInfo(false), 15000);
     }
 
     async function fetchJson(url) {
@@ -684,6 +766,14 @@
         unknownColor: colors.link,
         preservePointPositionsOnDataUpdate: true,
         selectPointOnClick: true,
+        onPointClick: (index) => {
+          if (typeof index !== "number") return;
+          showNodeInfoByIndex(index);
+        },
+        onLabelClick: (index) => {
+          if (typeof index !== "number") return;
+          showNodeInfoByIndex(index);
+        },
       };
 
       if (!state.graph) {
