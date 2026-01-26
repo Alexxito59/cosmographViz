@@ -1156,22 +1156,9 @@
 
     periodSelect.addEventListener("change", async () => {
       state.selectedPeriod = periodSelect.value;
-      if (state.graph) {
-        try {
-          await state.graph.destroy();
-        } catch (e) {
-          console.warn("[Teams Explorer] Failed to destroy graph", e);
-        }
-        state.graph = null;
-        state.controls.fit?.remove?.();
-        state.controls.zoom?.remove?.();
-        state.controls = {};
-        document.getElementById("fitControl").innerHTML = "";
-        document.getElementById("zoomControl").innerHTML = "";
-        showPlaceholder();
-      }
       await loadTeams();
-      await loadGraph();
+      // IMPORTANT: do not rebuild/reload the full graph on period change.
+      // The graph will update only when the user selects a team (team graph) or explicitly resets to full graph elsewhere.
       teamTitle.textContent = "–";
       authorsList.innerHTML = "";
       pubsList.innerHTML = "";
@@ -1186,12 +1173,28 @@
       await loadTeams();
       state.teamMembers.clear();
       state.selectedTeam = null;
+      state.focusedPointIndex = null;
       teamTitle.textContent = "–";
       authorsList.innerHTML = "";
       pubsList.innerHTML = "";
       renderTeams();
-      // Возвращаемся к полному графу
-      await loadGraph();
+      // IMPORTANT: do not rebuild/reload any graph on reset.
+      // Also clear the currently shown graph to avoid stale team graph.
+      if (state.graph) {
+        try {
+          await state.graph.destroy();
+        } catch (e) {
+          console.warn("[Teams Explorer] Failed to destroy graph", e);
+        }
+        state.graph = null;
+        state.controls.fit?.remove?.();
+        state.controls.zoom?.remove?.();
+        state.controls = {};
+        document.getElementById("fitControl").innerHTML = "";
+        document.getElementById("zoomControl").innerHTML = "";
+      }
+      showPlaceholder();
+      updateFocusRing();
       authorSearch.focus();
     });
     authorSearch.addEventListener("keydown", (e) => {
