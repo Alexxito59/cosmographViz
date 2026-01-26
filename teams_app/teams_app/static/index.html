@@ -191,7 +191,7 @@
     }
     .env-ring-circle {
       fill: none;
-      stroke: var(--accent-3);
+      stroke: #cc6600; /* environment (same as node color) */
       stroke-width: 2;
       stroke-linecap: round;
       stroke-dasharray: 6 8;
@@ -200,6 +200,24 @@
     }
     @keyframes envDash {
       to { stroke-dashoffset: -28; }
+    }
+    .core-ring-circle {
+      fill: none;
+      stroke: var(--accent-2); /* core */
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-dasharray: 6 8;
+      animation: envDash 1.6s linear infinite;
+      opacity: 0.95;
+    }
+    .periphery-ring-circle {
+      fill: none;
+      stroke: var(--accent-3); /* periphery */
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-dasharray: 6 8;
+      animation: envDash 1.6s linear infinite;
+      opacity: 0.95;
     }
     #graphPlaceholder {
       position: absolute;
@@ -246,6 +264,23 @@
       gap: 8px;
       z-index: 2;
     }
+    .link-toast {
+      position: fixed;
+      z-index: 20;
+      display: none;
+      pointer-events: none;
+      background: rgba(255,255,255,0.97);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      box-shadow: var(--shadow);
+      color: var(--text);
+      font-size: 13px;
+      max-width: 360px;
+      white-space: pre-line; /* allow \n in text */
+      word-break: break-word;
+    }
+    .link-toast.active { display: block; }
     .floating-btn {
       border: none;
       background: rgba(255,255,255,0.95);
@@ -433,8 +468,11 @@
       <div id="graph"></div>
       <svg id="focusRingOverlay" class="focus-ring-overlay hidden" aria-hidden="true">
         <g id="envRingsGroup"></g>
+        <g id="coreRingsGroup"></g>
+        <g id="peripheryRingsGroup"></g>
         <circle id="focusRingCircle" class="focus-ring-circle" cx="-10" cy="-10" r="0"></circle>
       </svg>
+      <div id="linkToast" class="link-toast"></div>
       <div id="graphPlaceholder" class="placeholder">
         <div class="placeholder-icon">📊</div>
         <div class="placeholder-text">Граф соавторства</div>
@@ -447,12 +485,14 @@
         </div>
         <div class="block">
           <label for="edgeWidth">Толщина ребер</label>
-          <input type="range" id="edgeWidth" min="0.2" max="1.5" step="0.05" value="0.6" />
+          <input type="range" id="edgeWidth" min="0.2" max="1.5" step="0.05" value="1.2" />
         </div>
       </div>
       <div class="graph-controls hidden">
         <div id="fitControl"></div>
         <div id="zoomControl"></div>
+        <button id="toggleCoreRings" class="floating-btn">core</button>
+        <button id="togglePeripheryRings" class="floating-btn">periphery</button>
         <button id="toggleEnvRings" class="floating-btn">Окружение</button>
         <button id="playPause" class="floating-btn">Пауза</button>
       </div>
@@ -557,12 +597,16 @@
       graph: null,
       controls: {},
       nodeSizeScale: 1.2,
-      edgeWidthScale: 0.6,
+      edgeWidthScale: 1.2,
       maxAuthorsPerDoc: 100,
       includeSinglePub: false,
       focusedPointIndex: null,
       envRingsEnabled: false,
       envRingIndices: [],
+      coreRingsEnabled: false,
+      coreRingIndices: [],
+      peripheryRingsEnabled: false,
+      peripheryRingIndices: [],
       simulation: {
         gravity: 0.25,
         repulsion: 1.0,
@@ -609,9 +653,15 @@
     const focusRingOverlay = document.getElementById("focusRingOverlay");
     const focusRingCircle = document.getElementById("focusRingCircle");
     const envRingsGroup = document.getElementById("envRingsGroup");
+    const coreRingsGroup = document.getElementById("coreRingsGroup");
+    const peripheryRingsGroup = document.getElementById("peripheryRingsGroup");
+    const toggleCoreRingsBtn = document.getElementById("toggleCoreRings");
+    const togglePeripheryRingsBtn = document.getElementById("togglePeripheryRings");
     const toggleEnvRingsBtn = document.getElementById("toggleEnvRings");
+    const linkToast = document.getElementById("linkToast");
     let focusRingRaf = null;
     let fitViewTimer = null;
+    let linkToastTimer = null;
     const nodeTeamsState = {
       authorId: null,
       period: null,
@@ -839,6 +889,14 @@
       state.envRingIndices = [];
       toggleEnvRingsBtn.disabled = true;
       toggleEnvRingsBtn.textContent = "Окружение";
+      state.coreRingsEnabled = false;
+      state.coreRingIndices = [];
+      toggleCoreRingsBtn.disabled = true;
+      toggleCoreRingsBtn.textContent = "core";
+      state.peripheryRingsEnabled = false;
+      state.peripheryRingIndices = [];
+      togglePeripheryRingsBtn.disabled = true;
+      togglePeripheryRingsBtn.textContent = "periphery";
       const indexById = new Map(state.nodes.map((n) => [n.id, n.idx]));
       state.edges = (data.edges || []).map((e) => ({
         ...e,
@@ -877,6 +935,14 @@
         toggleEnvRingsBtn.disabled = state.envRingIndices.length === 0;
         toggleEnvRingsBtn.textContent = "Окружение";
         state.envRingsEnabled = false;
+        state.coreRingIndices = state.nodes.filter((n) => n.status === "core").map((n) => n.idx);
+        toggleCoreRingsBtn.disabled = state.coreRingIndices.length === 0;
+        toggleCoreRingsBtn.textContent = "core";
+        state.coreRingsEnabled = false;
+        state.peripheryRingIndices = state.nodes.filter((n) => n.status === "periphery").map((n) => n.idx);
+        togglePeripheryRingsBtn.disabled = state.peripheryRingIndices.length === 0;
+        togglePeripheryRingsBtn.textContent = "periphery";
+        state.peripheryRingsEnabled = false;
         const indexById = new Map(state.nodes.map((n) => [n.id, n.idx]));
         state.edges = (data.edges || []).map((e) => ({
           ...e,
@@ -905,41 +971,51 @@
       const hasGraph = Boolean(state.graph);
       const focusActive = typeof state.focusedPointIndex === "number" && hasGraph;
       const envActive = Boolean(state.envRingsEnabled) && hasGraph && Array.isArray(state.envRingIndices) && state.envRingIndices.length > 0;
+      const coreActive = Boolean(state.coreRingsEnabled) && hasGraph && Array.isArray(state.coreRingIndices) && state.coreRingIndices.length > 0;
+      const peripheryActive = Boolean(state.peripheryRingsEnabled) && hasGraph && Array.isArray(state.peripheryRingIndices) && state.peripheryRingIndices.length > 0;
 
-      focusRingOverlay?.classList.toggle("hidden", !(focusActive || envActive));
-      if (!(focusActive || envActive)) {
+      focusRingOverlay?.classList.toggle("hidden", !(focusActive || envActive || coreActive || peripheryActive));
+      if (!(focusActive || envActive || coreActive || peripheryActive)) {
         if (focusRingRaf) cancelAnimationFrame(focusRingRaf);
         focusRingRaf = null;
         return;
       }
 
-      // Ensure env rings DOM exists (limit to avoid huge DOM)
-      if (envActive && envRingsGroup) {
+      function ensureRings(groupEl, active, indices, cls) {
+        if (!groupEl) return;
+        if (!active) {
+          groupEl.replaceChildren();
+          return;
+        }
         const MAX = 500;
-        const indices = state.envRingIndices.slice(0, MAX);
-        if (envRingsGroup.childElementCount !== indices.length) {
-          envRingsGroup.replaceChildren();
+        const list = indices.slice(0, MAX);
+        if (groupEl.childElementCount !== list.length) {
+          groupEl.replaceChildren();
           const ns = "http://www.w3.org/2000/svg";
-          for (const idx of indices) {
+          for (const idx of list) {
             const c = document.createElementNS(ns, "circle");
-            c.setAttribute("class", "env-ring-circle");
+            c.setAttribute("class", cls);
             c.setAttribute("data-idx", String(idx));
             c.setAttribute("cx", "-10");
             c.setAttribute("cy", "-10");
             c.setAttribute("r", "0");
-            envRingsGroup.appendChild(c);
+            groupEl.appendChild(c);
           }
         }
-      } else if (envRingsGroup) {
-        envRingsGroup.replaceChildren();
       }
+
+      ensureRings(envRingsGroup, envActive, state.envRingIndices, "env-ring-circle");
+      ensureRings(coreRingsGroup, coreActive, state.coreRingIndices, "core-ring-circle");
+      ensureRings(peripheryRingsGroup, peripheryActive, state.peripheryRingIndices, "periphery-ring-circle");
 
       const tick = () => {
         const hasGraphNow = Boolean(state.graph);
         const focusOn = typeof state.focusedPointIndex === "number" && hasGraphNow;
         const envOn = Boolean(state.envRingsEnabled) && hasGraphNow && Array.isArray(state.envRingIndices) && state.envRingIndices.length > 0;
+        const coreOn = Boolean(state.coreRingsEnabled) && hasGraphNow && Array.isArray(state.coreRingIndices) && state.coreRingIndices.length > 0;
+        const peripheryOn = Boolean(state.peripheryRingsEnabled) && hasGraphNow && Array.isArray(state.peripheryRingIndices) && state.peripheryRingIndices.length > 0;
 
-        if (!(focusOn || envOn)) {
+        if (!(focusOn || envOn || coreOn || peripheryOn)) {
           focusRingOverlay?.classList.add("hidden");
           focusRingRaf = null;
           return;
@@ -962,9 +1038,9 @@
           focusRingCircle.setAttribute("r", "0");
         }
 
-        // Environment rings
-        if (envOn && envRingsGroup) {
-          for (const el of envRingsGroup.children) {
+        function updateRings(groupEl, on) {
+          if (!on || !groupEl) return;
+          for (const el of groupEl.children) {
             const idx = Number(el.getAttribute("data-idx"));
             if (!Number.isFinite(idx)) continue;
             const spacePos = state.graph.getPointPositionByIndex(idx);
@@ -978,17 +1054,56 @@
             el.setAttribute("r", String(r));
           }
         }
+
+        updateRings(envRingsGroup, envOn);
+        updateRings(coreRingsGroup, coreOn);
+        updateRings(peripheryRingsGroup, peripheryOn);
         focusRingRaf = requestAnimationFrame(tick);
       };
       if (!focusRingRaf) focusRingRaf = requestAnimationFrame(tick);
+    }
+
+    function showLinkToastAt(text, x, y) {
+      if (!linkToast) return;
+      linkToast.textContent = text;
+      linkToast.classList.add("active");
+      // Position near cursor, then clamp after measuring actual size
+      const pad = 12;
+      linkToast.style.left = `${x + pad}px`;
+      linkToast.style.top = `${y + pad}px`;
+      requestAnimationFrame(() => {
+        if (!linkToast.classList.contains("active")) return;
+        const rect = linkToast.getBoundingClientRect();
+        const left = Math.min(Math.max(pad, x + pad), window.innerWidth - rect.width - pad);
+        const top = Math.min(Math.max(pad, y + pad), window.innerHeight - rect.height - pad);
+        linkToast.style.left = `${left}px`;
+        linkToast.style.top = `${top}px`;
+      });
+      if (linkToastTimer) window.clearTimeout(linkToastTimer);
+      linkToastTimer = window.setTimeout(() => {
+        linkToast.classList.remove("active");
+      }, 2500);
     }
 
     async function buildGraph({ reloadData = false } = {}) {
       const container = document.getElementById("graph");
       
       // Единый диапазон размеров для всех узлов (независимо от команды/окружения)
-      const sizeRange = [2 * state.nodeSizeScale, 14 * state.nodeSizeScale];
-      const widthRange = [0.2 * state.edgeWidthScale, 3 * state.edgeWidthScale];
+      const sizeRange = [3 * state.nodeSizeScale, 14 * state.nodeSizeScale];
+      // Edge width is quantized by weight buckets (see linkWidthByFn below),
+      // and then scaled by the slider value (edgeWidthScale).
+
+      function edgeWidthLevel(weight) {
+        const w = typeof weight === "number" ? weight : Number(weight) || 0;
+        if (w <= 0) return 0.8;
+        if (w === 1) return 1.1;
+        if (w === 2) return 1.6;
+        if (w <= 4) return 2.0;      // 3-4
+        if (w <= 8) return 2.4;      // 5-8
+        if (w <= 16) return 2.8;     // 9-16
+        if (w <= 32) return 3.2;     // 17-32
+        return 3.6;                  // 33+
+      }
       
       const config = {
         points: state.nodes,
@@ -1023,8 +1138,8 @@
         linkSourceIndexBy: "sourceIndex",
         linkTargetIndexBy: "targetIndex",
         linkWidthBy: "weight",
-        linkWidthRange: widthRange,
-        linkWidthStrategy: "auto",
+        linkWidthByFn: (value) => edgeWidthLevel(value) * state.edgeWidthScale,
+        linkWidthStrategy: "direct",
         linkColorBy: "pair",
         linkColorByFn: (pair) => {
           if (!pair) return colors.link;
@@ -1070,6 +1185,22 @@
         onPointClick: (index) => {
           if (typeof index !== "number") return;
           showNodeInfoByIndex(index);
+        },
+        onLinkClick: (linkIndex, event) => {
+          const e = state.edges?.[linkIndex];
+          if (!e) {
+            showLinkToastAt(`Ребро #${linkIndex}`, event?.clientX ?? 12, event?.clientY ?? 12);
+            return;
+          }
+          const sIdx = state.nodeIndexById.get(String(e.source));
+          const tIdx = state.nodeIndexById.get(String(e.target));
+          const sName = typeof sIdx === "number" ? (state.nodes[sIdx]?.label || String(e.source)) : String(e.source);
+          const tName = typeof tIdx === "number" ? (state.nodes[tIdx]?.label || String(e.target)) : String(e.target);
+          const w = e.weight;
+          const text = Number.isFinite(w) ? `${sName} — ${tName}\nвес: ${w}` : `${sName} — ${tName}`;
+          const x = event?.clientX ?? 12;
+          const y = event?.clientY ?? 12;
+          showLinkToastAt(text, x, y);
         },
         onLabelClick: (index) => {
           if (typeof index !== "number") return;
@@ -1331,6 +1462,18 @@
     toggleEnvRingsBtn.addEventListener("click", () => {
       state.envRingsEnabled = !state.envRingsEnabled;
       toggleEnvRingsBtn.textContent = state.envRingsEnabled ? "Окружение: выкл" : "Окружение";
+      updateFocusRing();
+    });
+
+    toggleCoreRingsBtn.addEventListener("click", () => {
+      state.coreRingsEnabled = !state.coreRingsEnabled;
+      toggleCoreRingsBtn.textContent = state.coreRingsEnabled ? "core: выкл" : "core";
+      updateFocusRing();
+    });
+
+    togglePeripheryRingsBtn.addEventListener("click", () => {
+      state.peripheryRingsEnabled = !state.peripheryRingsEnabled;
+      togglePeripheryRingsBtn.textContent = state.peripheryRingsEnabled ? "periphery: выкл" : "periphery";
       updateFocusRing();
     });
 
