@@ -593,6 +593,7 @@
     const focusRingOverlay = document.getElementById("focusRingOverlay");
     const focusRingCircle = document.getElementById("focusRingCircle");
     let focusRingRaf = null;
+    let fitViewTimer = null;
     const nodeTeamsState = {
       authorId: null,
       period: null,
@@ -1008,6 +1009,17 @@
         await state.graph.dataUploaded();
         hidePlaceholder();
         updateFocusRing();
+        // After the graph becomes visible, auto-fit view once (delayed).
+        if (fitViewTimer) window.clearTimeout(fitViewTimer);
+        const graphRef = state.graph;
+        fitViewTimer = window.setTimeout(() => {
+          if (state.graph !== graphRef) return;
+          try {
+            state.graph?.fitView?.();
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to fit view", e);
+          }
+        }, 4000);
       } else {
         // Keep `points`/`links` in config on every update to avoid Cosmograph dropping local tables.
         // When `points`/`links` references are unchanged, Cosmograph will update visual properties (e.g. colors)
@@ -1018,6 +1030,18 @@
         }
         hidePlaceholder();
         updateFocusRing();
+        if (reloadData) {
+          if (fitViewTimer) window.clearTimeout(fitViewTimer);
+          const graphRef = state.graph;
+          fitViewTimer = window.setTimeout(() => {
+            if (state.graph !== graphRef) return;
+            try {
+              state.graph?.fitView?.();
+            } catch (e) {
+              console.warn("[Teams Explorer] Failed to fit view", e);
+            }
+          }, 4000);
+        }
       }
     }
 
@@ -1042,6 +1066,8 @@
           state.controls = {};
           document.getElementById("fitControl").innerHTML = "";
           document.getElementById("zoomControl").innerHTML = "";
+          if (fitViewTimer) window.clearTimeout(fitViewTimer);
+          fitViewTimer = null;
         }
         showPlaceholder();
         teamTitle.textContent = "–";
@@ -1192,6 +1218,8 @@
         state.controls = {};
         document.getElementById("fitControl").innerHTML = "";
         document.getElementById("zoomControl").innerHTML = "";
+        if (fitViewTimer) window.clearTimeout(fitViewTimer);
+        fitViewTimer = null;
       }
       showPlaceholder();
       updateFocusRing();
