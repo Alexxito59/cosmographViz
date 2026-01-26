@@ -189,6 +189,18 @@
     @keyframes focusDash {
       to { stroke-dashoffset: -36; }
     }
+    .env-ring-circle {
+      fill: none;
+      stroke: var(--accent-3);
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-dasharray: 6 8;
+      animation: envDash 1.6s linear infinite;
+      opacity: 0.95;
+    }
+    @keyframes envDash {
+      to { stroke-dashoffset: -28; }
+    }
     #graphPlaceholder {
       position: absolute;
       top: 0;
@@ -420,6 +432,7 @@
     <main class="central">
       <div id="graph"></div>
       <svg id="focusRingOverlay" class="focus-ring-overlay hidden" aria-hidden="true">
+        <g id="envRingsGroup"></g>
         <circle id="focusRingCircle" class="focus-ring-circle" cx="-10" cy="-10" r="0"></circle>
       </svg>
       <div id="graphPlaceholder" class="placeholder">
@@ -440,6 +453,7 @@
       <div class="graph-controls hidden">
         <div id="fitControl"></div>
         <div id="zoomControl"></div>
+        <button id="toggleEnvRings" class="floating-btn">Окружение</button>
         <button id="playPause" class="floating-btn">Пауза</button>
       </div>
     </main>
@@ -547,6 +561,8 @@
       maxAuthorsPerDoc: 100,
       includeSinglePub: false,
       focusedPointIndex: null,
+      envRingsEnabled: false,
+      envRingIndices: [],
       simulation: {
         gravity: 0.25,
         repulsion: 1.0,
@@ -592,6 +608,8 @@
     const graphControls = document.querySelector(".graph-controls");
     const focusRingOverlay = document.getElementById("focusRingOverlay");
     const focusRingCircle = document.getElementById("focusRingCircle");
+    const envRingsGroup = document.getElementById("envRingsGroup");
+    const toggleEnvRingsBtn = document.getElementById("toggleEnvRings");
     let focusRingRaf = null;
     let fitViewTimer = null;
     const nodeTeamsState = {
@@ -817,6 +835,10 @@
       }));
       state.nodeIndexById = new Map(state.nodes.map((n) => [String(n.id), n.idx]));
       state.focusedPointIndex = null;
+      state.envRingsEnabled = false;
+      state.envRingIndices = [];
+      toggleEnvRingsBtn.disabled = true;
+      toggleEnvRingsBtn.textContent = "Окружение";
       const indexById = new Map(state.nodes.map((n) => [n.id, n.idx]));
       state.edges = (data.edges || []).map((e) => ({
         ...e,
@@ -851,6 +873,10 @@
         }));
         state.nodeIndexById = new Map(state.nodes.map((n) => [String(n.id), n.idx]));
         state.focusedPointIndex = null;
+        state.envRingIndices = state.nodes.filter((n) => !n.status).map((n) => n.idx);
+        toggleEnvRingsBtn.disabled = state.envRingIndices.length === 0;
+        toggleEnvRingsBtn.textContent = "Окружение";
+        state.envRingsEnabled = false;
         const indexById = new Map(state.nodes.map((n) => [n.id, n.idx]));
         state.edges = (data.edges || []).map((e) => ({
           ...e,
@@ -876,33 +902,82 @@
     }
 
     function updateFocusRing() {
-      const show = typeof state.focusedPointIndex === "number" && Boolean(state.graph);
-      focusRingOverlay?.classList.toggle("hidden", !show);
-      if (!show) {
+      const hasGraph = Boolean(state.graph);
+      const focusActive = typeof state.focusedPointIndex === "number" && hasGraph;
+      const envActive = Boolean(state.envRingsEnabled) && hasGraph && Array.isArray(state.envRingIndices) && state.envRingIndices.length > 0;
+
+      focusRingOverlay?.classList.toggle("hidden", !(focusActive || envActive));
+      if (!(focusActive || envActive)) {
         if (focusRingRaf) cancelAnimationFrame(focusRingRaf);
         focusRingRaf = null;
         return;
       }
 
+      // Ensure env rings DOM exists (limit to avoid huge DOM)
+      if (envActive && envRingsGroup) {
+        const MAX = 500;
+        const indices = state.envRingIndices.slice(0, MAX);
+        if (envRingsGroup.childElementCount !== indices.length) {
+          envRingsGroup.replaceChildren();
+          const ns = "http://www.w3.org/2000/svg";
+          for (const idx of indices) {
+            const c = document.createElementNS(ns, "circle");
+            c.setAttribute("class", "env-ring-circle");
+            c.setAttribute("data-idx", String(idx));
+            c.setAttribute("cx", "-10");
+            c.setAttribute("cy", "-10");
+            c.setAttribute("r", "0");
+            envRingsGroup.appendChild(c);
+          }
+        }
+      } else if (envRingsGroup) {
+        envRingsGroup.replaceChildren();
+      }
+
       const tick = () => {
-        if (!state.graph || typeof state.focusedPointIndex !== "number") {
+        const hasGraphNow = Boolean(state.graph);
+        const focusOn = typeof state.focusedPointIndex === "number" && hasGraphNow;
+        const envOn = Boolean(state.envRingsEnabled) && hasGraphNow && Array.isArray(state.envRingIndices) && state.envRingIndices.length > 0;
+
+        if (!(focusOn || envOn)) {
           focusRingOverlay?.classList.add("hidden");
           focusRingRaf = null;
           return;
         }
-        const index = state.focusedPointIndex;
-        const spacePos = state.graph.getPointPositionByIndex(index);
-        const screenPos = spacePos ? state.graph.spaceToScreenPosition(spacePos) : undefined;
-        const baseR = state.graph.getPointScreenRadiusByIndex(index);
-        if (!screenPos || !Number.isFinite(baseR)) {
-          focusRingRaf = requestAnimationFrame(tick);
-          return;
+
+        // Focus ring
+        if (focusOn && focusRingCircle) {
+          const index = state.focusedPointIndex;
+          const spacePos = state.graph.getPointPositionByIndex(index);
+          const screenPos = spacePos ? state.graph.spaceToScreenPosition(spacePos) : undefined;
+          const baseR = state.graph.getPointScreenRadiusByIndex(index);
+          if (screenPos && Number.isFinite(baseR)) {
+            const [x, y] = screenPos;
+            const r = (baseR || 0) * 1.5 + 6;
+            focusRingCircle.setAttribute("cx", String(x));
+            focusRingCircle.setAttribute("cy", String(y));
+            focusRingCircle.setAttribute("r", String(r));
+          }
+        } else if (focusRingCircle) {
+          focusRingCircle.setAttribute("r", "0");
         }
-        const [x, y] = screenPos;
-        const r = (baseR || 0) * 1.5 + 6; // ~1.5x radius + padding
-        focusRingCircle?.setAttribute("cx", String(x));
-        focusRingCircle?.setAttribute("cy", String(y));
-        focusRingCircle?.setAttribute("r", String(r));
+
+        // Environment rings
+        if (envOn && envRingsGroup) {
+          for (const el of envRingsGroup.children) {
+            const idx = Number(el.getAttribute("data-idx"));
+            if (!Number.isFinite(idx)) continue;
+            const spacePos = state.graph.getPointPositionByIndex(idx);
+            const screenPos = spacePos ? state.graph.spaceToScreenPosition(spacePos) : undefined;
+            const baseR = state.graph.getPointScreenRadiusByIndex(idx);
+            if (!screenPos || !Number.isFinite(baseR)) continue;
+            const [x, y] = screenPos;
+            const r = (baseR || 0) * 1.2 + 4;
+            el.setAttribute("cx", String(x));
+            el.setAttribute("cy", String(y));
+            el.setAttribute("r", String(r));
+          }
+        }
         focusRingRaf = requestAnimationFrame(tick);
       };
       if (!focusRingRaf) focusRingRaf = requestAnimationFrame(tick);
@@ -1252,6 +1327,12 @@
     });
 
     hideNodeInfoBtn.addEventListener("click", () => toggleNodeInfo(false));
+
+    toggleEnvRingsBtn.addEventListener("click", () => {
+      state.envRingsEnabled = !state.envRingsEnabled;
+      toggleEnvRingsBtn.textContent = state.envRingsEnabled ? "Окружение: выкл" : "Окружение";
+      updateFocusRing();
+    });
 
     (async function init() {
       await loadPeriods();
