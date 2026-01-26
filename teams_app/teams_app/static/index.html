@@ -321,7 +321,7 @@
     #nodeInfoModal {
       inset: auto;
       /* right panel is 340px in the layout grid; shift left by it */
-      top: 60px; /* below top-right controls ("Запустить") */
+      top: 92px; /* below top-right controls */
       right: calc(340px + 12px);
       background: transparent;
       align-items: flex-start;
@@ -607,6 +607,9 @@
       coreRingIndices: [],
       peripheryRingsEnabled: false,
       peripheryRingIndices: [],
+      // We control the UI state for play/pause ourselves because Cosmograph's
+      // `isSimulationRunning` can be transient/out-of-sync during data reloads.
+      simulationPaused: false,
       simulation: {
         gravity: 0.25,
         repulsion: 1.0,
@@ -670,6 +673,18 @@
       error: null,
       teams: [],
     };
+
+    function syncPlayPauseButton() {
+      if (!playPauseBtn) return;
+      if (!state.graph) {
+        playPauseBtn.disabled = true;
+        // Default label when no graph is shown (prevents stale state).
+        playPauseBtn.textContent = "Пауза";
+        return;
+      }
+      playPauseBtn.disabled = false;
+      playPauseBtn.textContent = state.simulationPaused ? "Запустить" : "Пауза";
+    }
 
     const settingInputs = {
       gravity: document.getElementById("gravity"),
@@ -1099,9 +1114,9 @@
         if (w === 1) return 1.1;
         if (w === 2) return 1.6;
         if (w <= 4) return 2.0;      // 3-4
-        if (w <= 8) return 2.4;      // 5-8
-        if (w <= 16) return 2.8;     // 9-16
-        if (w <= 32) return 3.2;     // 17-32
+        if (w <= 8) return 2.8;      // 5-8
+        if (w <= 16) return 3.2;     // 9-16
+        if (w <= 32) return 4.0;     // 17-32
         return 3.6;                  // 33+
       }
       
@@ -1213,8 +1228,16 @@
         state.controls.fit = new CosmographButtonFitView(state.graph, document.getElementById("fitControl"));
         state.controls.zoom = new CosmographButtonZoomInOut(state.graph, document.getElementById("zoomControl"));
         await state.graph.dataUploaded();
+        // When a graph is (re)created, simulation should be running by default.
+        state.simulationPaused = false;
+        try {
+          state.graph.unpause();
+        } catch (e) {
+          // ignore - depends on Cosmograph internals
+        }
         hidePlaceholder();
         updateFocusRing();
+        syncPlayPauseButton();
         // After the graph becomes visible, auto-fit view once (delayed).
         if (fitViewTimer) window.clearTimeout(fitViewTimer);
         const graphRef = state.graph;
@@ -1233,9 +1256,17 @@
         await state.graph.setConfig(config);
         if (reloadData) {
           await state.graph.dataUploaded();
+          // Switching team / reloading data should auto-start the simulation.
+          state.simulationPaused = false;
+          try {
+            state.graph.unpause();
+          } catch (e) {
+            // ignore - depends on Cosmograph internals
+          }
         }
         hidePlaceholder();
         updateFocusRing();
+        syncPlayPauseButton();
         if (reloadData) {
           if (fitViewTimer) window.clearTimeout(fitViewTimer);
           const graphRef = state.graph;
@@ -1275,6 +1306,8 @@
           if (fitViewTimer) window.clearTimeout(fitViewTimer);
           fitViewTimer = null;
         }
+        state.simulationPaused = false;
+        syncPlayPauseButton();
         showPlaceholder();
         teamTitle.textContent = "–";
         authorsList.innerHTML = "";
@@ -1377,13 +1410,14 @@
 
     function toggleSimulation() {
       if (!state.graph) return;
-      if (state.graph.isSimulationRunning) {
-        state.graph.pause();
-        playPauseBtn.textContent = "Запустить";
-      } else {
+      if (state.simulationPaused) {
         state.graph.unpause();
-        playPauseBtn.textContent = "Пауза";
+        state.simulationPaused = false;
+      } else {
+        state.graph.pause();
+        state.simulationPaused = true;
       }
+      syncPlayPauseButton();
     }
 
     periodSelect.addEventListener("change", async () => {
@@ -1427,6 +1461,8 @@
         if (fitViewTimer) window.clearTimeout(fitViewTimer);
         fitViewTimer = null;
       }
+      state.simulationPaused = false;
+      syncPlayPauseButton();
       showPlaceholder();
       updateFocusRing();
       authorSearch.focus();
@@ -1482,6 +1518,7 @@
       await loadTeams();
       settingInputs.includeSinglePub.checked = state.includeSinglePub;
       showPlaceholder();
+      syncPlayPauseButton();
     })();
   </script>
 </body>
