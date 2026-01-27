@@ -145,6 +145,7 @@
       background: #fff;
       margin-bottom: 8px;
     }
+    .author-row { cursor: pointer; }
     .author-row .name { font-weight: 600; }
     .author-row .status { font-size: 12px; color: var(--muted); }
     .pub-authors { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
@@ -166,6 +167,57 @@
     #graph {
       width: 100%;
       height: 100%;
+    }
+    .focus-ring-overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 1; /* above canvas, below toolbars (z=2) */
+    }
+    .focus-ring-overlay.hidden { display: none; }
+    .focus-ring-circle {
+      fill: none;
+      stroke: #000;
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      stroke-dasharray: 10 8;
+      animation: focusDash 1.1s linear infinite;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.18));
+    }
+    @keyframes focusDash {
+      to { stroke-dashoffset: -36; }
+    }
+    .env-ring-circle {
+      fill: none;
+      stroke: #cc6600; /* environment (same as node color) */
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-dasharray: 6 8;
+      animation: envDash 1.6s linear infinite;
+      opacity: 0.95;
+    }
+    @keyframes envDash {
+      to { stroke-dashoffset: -28; }
+    }
+    .core-ring-circle {
+      fill: none;
+      stroke: var(--accent-2); /* core */
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-dasharray: 6 8;
+      animation: envDash 1.6s linear infinite;
+      opacity: 0.95;
+    }
+    .periphery-ring-circle {
+      fill: none;
+      stroke: var(--accent-3); /* periphery */
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-dasharray: 6 8;
+      animation: envDash 1.6s linear infinite;
+      opacity: 0.95;
     }
     #graphPlaceholder {
       position: absolute;
@@ -212,6 +264,23 @@
       gap: 8px;
       z-index: 2;
     }
+    .link-toast {
+      position: fixed;
+      z-index: 20;
+      display: none;
+      pointer-events: none;
+      background: rgba(255,255,255,0.97);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      box-shadow: var(--shadow);
+      color: var(--text);
+      font-size: 13px;
+      max-width: 360px;
+      white-space: pre-line; /* allow \n in text */
+      word-break: break-word;
+    }
+    .link-toast.active { display: block; }
     .floating-btn {
       border: none;
       background: rgba(255,255,255,0.95);
@@ -244,10 +313,97 @@
       box-shadow: var(--shadow);
       border: 1px solid var(--border);
     }
+    .modal-card.wide {
+      width: 520px;
+      max-width: calc(100vw - 32px);
+    }
+    /* Info toast: inside graph area (avoid right panel), no overlay, doesn't block graph */
+    #nodeInfoModal {
+      inset: auto;
+      /* right panel is 340px in the layout grid; shift left by it */
+      top: 92px; /* below top-right controls */
+      right: calc(340px + 12px);
+      background: transparent;
+      align-items: flex-start;
+      justify-content: flex-end;
+      pointer-events: none; /* clicks pass through */
+      z-index: 9; /* below global modal (10), above graph controls (2) */
+    }
+    #nodeInfoModal.active { display: flex; }
+    #nodeInfoModal .modal-card {
+      width: 360px;
+      max-width: calc(100vw - 24px);
+      pointer-events: auto; /* clickable if needed */
+    }
     .modal h3 { margin: 0 0 12px 0; }
     .modal .control { margin-bottom: 10px; }
     .small { font-size: 12px; color: var(--muted); }
     .empty { color: var(--muted); text-align: center; margin-top: 16px; }
+    .node-info {
+      display: grid;
+      gap: 8px;
+    }
+    .node-info .value {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+      word-break: break-word;
+    }
+    .node-info .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .node-info-actions {
+      display: flex;
+      justify-content: flex-start;
+      margin-top: 10px;
+    }
+    .node-info-actions .btn {
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 600;
+      box-shadow: var(--shadow);
+    }
+    .node-teams {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .node-teams.hidden { display: none; }
+    .node-teams .row-item {
+      padding: 10px 10px;
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      gap: 4px;
+    }
+    .node-teams .row-item:last-child { border-bottom: none; }
+    .node-teams .row-item .topline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .node-teams .row-item .subline {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.3;
+    }
+    .node-teams .muted {
+      padding: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
     .placeholder {
       width: 100%;
       height: 100%;
@@ -310,6 +466,13 @@
 
     <main class="central">
       <div id="graph"></div>
+      <svg id="focusRingOverlay" class="focus-ring-overlay hidden" aria-hidden="true">
+        <g id="envRingsGroup"></g>
+        <g id="coreRingsGroup"></g>
+        <g id="peripheryRingsGroup"></g>
+        <circle id="focusRingCircle" class="focus-ring-circle" cx="-10" cy="-10" r="0"></circle>
+      </svg>
+      <div id="linkToast" class="link-toast"></div>
       <div id="graphPlaceholder" class="placeholder">
         <div class="placeholder-icon">📊</div>
         <div class="placeholder-text">Граф соавторства</div>
@@ -322,12 +485,15 @@
         </div>
         <div class="block">
           <label for="edgeWidth">Толщина ребер</label>
-          <input type="range" id="edgeWidth" min="0.2" max="1.5" step="0.05" value="0.6" />
+          <input type="range" id="edgeWidth" min="0.2" max="1.5" step="0.05" value="1.2" />
         </div>
       </div>
       <div class="graph-controls hidden">
         <div id="fitControl"></div>
         <div id="zoomControl"></div>
+        <button id="toggleCoreRings" class="floating-btn">core</button>
+        <button id="togglePeripheryRings" class="floating-btn">periphery</button>
+        <button id="toggleEnvRings" class="floating-btn">Окружение</button>
         <button id="playPause" class="floating-btn">Пауза</button>
       </div>
     </main>
@@ -395,6 +561,23 @@
     </div>
   </div>
 
+  <div id="nodeInfoModal" class="modal">
+    <div class="modal-card">
+      <div class="row" style="align-items:center; justify-content: space-between; gap: 10px;">
+        <h3 style="margin: 0;">Информация об авторе</h3>
+        <button id="hideNodeInfoBtn" class="floating-btn" type="button" style="padding: 8px 10px; box-shadow: none;">Скрыть</button>
+      </div>
+      <div class="node-info">
+        <div id="nodeInfoLabel" class="value">–</div>
+        <div id="nodeInfoMeta" class="meta"></div>
+        <div class="node-info-actions">
+          <button id="nodeTeamsBtn" class="btn" type="button">Показать список команд автора</button>
+        </div>
+        <div id="nodeTeams" class="node-teams hidden"></div>
+      </div>
+    </div>
+  </div>
+
   <script type="module">
     import {
       Cosmograph,
@@ -409,13 +592,24 @@
       selectedTeam: null,
       nodes: [],
       edges: [],
+      nodeIndexById: new Map(),
       teamMembers: new Map(),
       graph: null,
       controls: {},
       nodeSizeScale: 1.2,
-      edgeWidthScale: 0.6,
+      edgeWidthScale: 1.2,
       maxAuthorsPerDoc: 100,
       includeSinglePub: false,
+      focusedPointIndex: null,
+      envRingsEnabled: false,
+      envRingIndices: [],
+      coreRingsEnabled: false,
+      coreRingIndices: [],
+      peripheryRingsEnabled: false,
+      peripheryRingIndices: [],
+      // We control the UI state for play/pause ourselves because Cosmograph's
+      // `isSimulationRunning` can be transient/out-of-sync during data reloads.
+      simulationPaused: false,
       simulation: {
         gravity: 0.25,
         repulsion: 1.0,
@@ -450,9 +644,47 @@
     const settingsBtn = document.getElementById("settingsBtn");
     const closeSettings = document.getElementById("closeSettings");
     const applySettings = document.getElementById("applySettings");
+    const nodeInfoModal = document.getElementById("nodeInfoModal");
+    const nodeInfoLabel = document.getElementById("nodeInfoLabel");
+    const nodeInfoMeta = document.getElementById("nodeInfoMeta");
+    const hideNodeInfoBtn = document.getElementById("hideNodeInfoBtn");
+    const nodeTeamsBtn = document.getElementById("nodeTeamsBtn");
+    const nodeTeams = document.getElementById("nodeTeams");
     const graphPlaceholder = document.getElementById("graphPlaceholder");
     const toolbar = document.querySelector(".toolbar");
     const graphControls = document.querySelector(".graph-controls");
+    const focusRingOverlay = document.getElementById("focusRingOverlay");
+    const focusRingCircle = document.getElementById("focusRingCircle");
+    const envRingsGroup = document.getElementById("envRingsGroup");
+    const coreRingsGroup = document.getElementById("coreRingsGroup");
+    const peripheryRingsGroup = document.getElementById("peripheryRingsGroup");
+    const toggleCoreRingsBtn = document.getElementById("toggleCoreRings");
+    const togglePeripheryRingsBtn = document.getElementById("togglePeripheryRings");
+    const toggleEnvRingsBtn = document.getElementById("toggleEnvRings");
+    const linkToast = document.getElementById("linkToast");
+    let focusRingRaf = null;
+    let fitViewTimer = null;
+    let linkToastTimer = null;
+    const nodeTeamsState = {
+      authorId: null,
+      period: null,
+      isOpen: false,
+      isLoading: false,
+      error: null,
+      teams: [],
+    };
+
+    function syncPlayPauseButton() {
+      if (!playPauseBtn) return;
+      if (!state.graph) {
+        playPauseBtn.disabled = true;
+        // Default label when no graph is shown (prevents stale state).
+        playPauseBtn.textContent = "Пауза";
+        return;
+      }
+      playPauseBtn.disabled = false;
+      playPauseBtn.textContent = state.simulationPaused ? "Запустить" : "Пауза";
+    }
 
     const settingInputs = {
       gravity: document.getElementById("gravity"),
@@ -479,6 +711,116 @@
       graphPlaceholder?.classList.add("hidden");
       toolbar?.classList.remove("hidden");
       graphControls?.classList.remove("hidden");
+    }
+
+    function toggleNodeInfo(show) {
+      nodeInfoModal?.classList.toggle("active", show);
+      if (!show) {
+        // Free memory from previously rendered content
+        nodeInfoLabel.textContent = "–";
+        nodeInfoMeta.textContent = "";
+        nodeTeams.innerHTML = "";
+
+        nodeTeamsState.authorId = null;
+        nodeTeamsState.period = null;
+        nodeTeamsState.isOpen = false;
+        nodeTeamsState.isLoading = false;
+        nodeTeamsState.error = null;
+        nodeTeamsState.teams = [];
+        renderNodeTeams();
+      }
+    }
+
+    function renderNodeTeams() {
+      const shouldShow = Boolean(nodeTeamsState.isOpen);
+      nodeTeams.classList.toggle("hidden", !shouldShow);
+      nodeTeamsBtn.textContent = nodeTeamsState.isOpen ? "Скрыть список команд автора" : "Показать список команд автора";
+      if (!shouldShow) {
+        nodeTeams.innerHTML = "";
+        return;
+      }
+      if (!state.selectedPeriod) {
+        nodeTeams.innerHTML = '<div class="muted">Сначала выберите период.</div>';
+        return;
+      }
+      if (nodeTeamsState.isLoading) {
+        nodeTeams.innerHTML = '<div class="muted">Загрузка…</div>';
+        return;
+      }
+      if (nodeTeamsState.error) {
+        nodeTeams.innerHTML = `<div class="muted">Ошибка: ${nodeTeamsState.error}</div>`;
+        return;
+      }
+      if (!nodeTeamsState.teams.length) {
+        nodeTeams.innerHTML = '<div class="muted">Команды за выбранный период не найдены.</div>';
+        return;
+      }
+      nodeTeams.innerHTML = nodeTeamsState.teams
+        .map((t) => {
+          const status = t.author_status || "core";
+          return `
+            <div class="row-item">
+              <div class="topline">
+                <div>Команда #${t.team_id}</div>
+                <div class="small">${status}</div>
+              </div>
+              <div class="subline">${t.sample_authors || "—"}</div>
+              <div class="subline">Всего авторов: ${t.authors_count} • core: ${t.core_count} • periphery: ${t.periphery_count}</div>
+            </div>
+          `;
+        })
+        .join("");
+    }
+
+    async function loadAuthorTeams(authorId) {
+      if (!authorId || !state.selectedPeriod) return;
+      const period = state.selectedPeriod;
+      if (nodeTeamsState.isLoading) return;
+      // Avoid refetch if already loaded for same author+period
+      if (nodeTeamsState.authorId === String(authorId) && nodeTeamsState.period === period && nodeTeamsState.teams.length) {
+        return;
+      }
+      nodeTeamsState.isLoading = true;
+      nodeTeamsState.error = null;
+      nodeTeamsState.teams = [];
+      renderNodeTeams();
+      try {
+        const data = await fetchJson(`/api/authors/${encodeURIComponent(String(authorId))}/teams?period=${encodeURIComponent(period)}`);
+        nodeTeamsState.authorId = String(authorId);
+        nodeTeamsState.period = period;
+        nodeTeamsState.teams = data.teams || [];
+      } catch (e) {
+        nodeTeamsState.error = e?.message || String(e);
+      } finally {
+        nodeTeamsState.isLoading = false;
+        renderNodeTeams();
+      }
+    }
+
+    function getNodeByCosmographIndex(index) {
+      // Cosmograph passes internal point index; in our data it's `idx` but be defensive.
+      const direct = state.nodes[index];
+      if (direct && direct.idx === index) return direct;
+      return state.nodes.find((n) => n.idx === index);
+    }
+
+    function showNodeInfoByIndex(index) {
+      const node = getNodeByCosmographIndex(index);
+      if (!node) return;
+      nodeInfoLabel.textContent = node.label || "—";
+      const meta = [];
+      if (node.id != null) meta.push(`id: ${node.id}`);
+      if (node.pubs != null) meta.push(`публикаций: ${node.pubs}`);
+      if (node.status) meta.push(`статус: ${node.status}`);
+      nodeInfoMeta.textContent = meta.join(" • ");
+      toggleNodeInfo(true);
+      nodeTeamsState.authorId = String(node.id ?? "");
+      nodeTeamsState.period = state.selectedPeriod;
+      nodeTeamsState.isOpen = false;
+      nodeTeamsState.isLoading = false;
+      nodeTeamsState.error = null;
+      nodeTeamsState.teams = [];
+      renderNodeTeams();
     }
 
     async function fetchJson(url) {
@@ -556,6 +898,20 @@
         idx,
         label: fmtName(n),
       }));
+      state.nodeIndexById = new Map(state.nodes.map((n) => [String(n.id), n.idx]));
+      state.focusedPointIndex = null;
+      state.envRingsEnabled = false;
+      state.envRingIndices = [];
+      toggleEnvRingsBtn.disabled = true;
+      toggleEnvRingsBtn.textContent = "Окружение";
+      state.coreRingsEnabled = false;
+      state.coreRingIndices = [];
+      toggleCoreRingsBtn.disabled = true;
+      toggleCoreRingsBtn.textContent = "core";
+      state.peripheryRingsEnabled = false;
+      state.peripheryRingIndices = [];
+      togglePeripheryRingsBtn.disabled = true;
+      togglePeripheryRingsBtn.textContent = "periphery";
       const indexById = new Map(state.nodes.map((n) => [n.id, n.idx]));
       state.edges = (data.edges || []).map((e) => ({
         ...e,
@@ -563,7 +919,7 @@
         targetIndex: indexById.get(e.target) ?? -1,
         pair: `${e.source}|${e.target}`,
       }));
-      void buildGraph({ reloadData: true });
+      await buildGraph({ reloadData: true });
     }
 
     async function loadTeamGraph(teamId) {
@@ -588,6 +944,20 @@
           idx,
           label: fmtName(n),
         }));
+        state.nodeIndexById = new Map(state.nodes.map((n) => [String(n.id), n.idx]));
+        state.focusedPointIndex = null;
+        state.envRingIndices = state.nodes.filter((n) => !n.status).map((n) => n.idx);
+        toggleEnvRingsBtn.disabled = state.envRingIndices.length === 0;
+        toggleEnvRingsBtn.textContent = "Окружение";
+        state.envRingsEnabled = false;
+        state.coreRingIndices = state.nodes.filter((n) => n.status === "core").map((n) => n.idx);
+        toggleCoreRingsBtn.disabled = state.coreRingIndices.length === 0;
+        toggleCoreRingsBtn.textContent = "core";
+        state.coreRingsEnabled = false;
+        state.peripheryRingIndices = state.nodes.filter((n) => n.status === "periphery").map((n) => n.idx);
+        togglePeripheryRingsBtn.disabled = state.peripheryRingIndices.length === 0;
+        togglePeripheryRingsBtn.textContent = "periphery";
+        state.peripheryRingsEnabled = false;
         const indexById = new Map(state.nodes.map((n) => [n.id, n.idx]));
         state.edges = (data.edges || []).map((e) => ({
           ...e,
@@ -596,19 +966,159 @@
           pair: `${e.source}|${e.target}`,
         }));
         console.log(`[Teams Explorer] Loaded ${state.edges.length} edges`);
-        void buildGraph({ reloadData: true });
+        await buildGraph({ reloadData: true });
       } catch (error) {
         console.error(`[Teams Explorer] Error loading team graph:`, error);
         throw error;
       }
     }
 
+    function focusPointByAuthorId(authorId) {
+      const idx = state.nodeIndexById.get(String(authorId));
+      if (typeof idx !== "number") return;
+      // Toggle: clicking the same author again removes focus/boost
+      state.focusedPointIndex = state.focusedPointIndex === idx ? null : idx;
+      updateFocusRing();
+      void buildGraph();
+    }
+
+    function updateFocusRing() {
+      const hasGraph = Boolean(state.graph);
+      const focusActive = typeof state.focusedPointIndex === "number" && hasGraph;
+      const envActive = Boolean(state.envRingsEnabled) && hasGraph && Array.isArray(state.envRingIndices) && state.envRingIndices.length > 0;
+      const coreActive = Boolean(state.coreRingsEnabled) && hasGraph && Array.isArray(state.coreRingIndices) && state.coreRingIndices.length > 0;
+      const peripheryActive = Boolean(state.peripheryRingsEnabled) && hasGraph && Array.isArray(state.peripheryRingIndices) && state.peripheryRingIndices.length > 0;
+
+      focusRingOverlay?.classList.toggle("hidden", !(focusActive || envActive || coreActive || peripheryActive));
+      if (!(focusActive || envActive || coreActive || peripheryActive)) {
+        if (focusRingRaf) cancelAnimationFrame(focusRingRaf);
+        focusRingRaf = null;
+        return;
+      }
+
+      function ensureRings(groupEl, active, indices, cls) {
+        if (!groupEl) return;
+        if (!active) {
+          groupEl.replaceChildren();
+          return;
+        }
+        const MAX = 500;
+        const list = indices.slice(0, MAX);
+        if (groupEl.childElementCount !== list.length) {
+          groupEl.replaceChildren();
+          const ns = "http://www.w3.org/2000/svg";
+          for (const idx of list) {
+            const c = document.createElementNS(ns, "circle");
+            c.setAttribute("class", cls);
+            c.setAttribute("data-idx", String(idx));
+            c.setAttribute("cx", "-10");
+            c.setAttribute("cy", "-10");
+            c.setAttribute("r", "0");
+            groupEl.appendChild(c);
+          }
+        }
+      }
+
+      ensureRings(envRingsGroup, envActive, state.envRingIndices, "env-ring-circle");
+      ensureRings(coreRingsGroup, coreActive, state.coreRingIndices, "core-ring-circle");
+      ensureRings(peripheryRingsGroup, peripheryActive, state.peripheryRingIndices, "periphery-ring-circle");
+
+      const tick = () => {
+        const hasGraphNow = Boolean(state.graph);
+        const focusOn = typeof state.focusedPointIndex === "number" && hasGraphNow;
+        const envOn = Boolean(state.envRingsEnabled) && hasGraphNow && Array.isArray(state.envRingIndices) && state.envRingIndices.length > 0;
+        const coreOn = Boolean(state.coreRingsEnabled) && hasGraphNow && Array.isArray(state.coreRingIndices) && state.coreRingIndices.length > 0;
+        const peripheryOn = Boolean(state.peripheryRingsEnabled) && hasGraphNow && Array.isArray(state.peripheryRingIndices) && state.peripheryRingIndices.length > 0;
+
+        if (!(focusOn || envOn || coreOn || peripheryOn)) {
+          focusRingOverlay?.classList.add("hidden");
+          focusRingRaf = null;
+          return;
+        }
+
+        // Focus ring
+        if (focusOn && focusRingCircle) {
+          const index = state.focusedPointIndex;
+          const spacePos = state.graph.getPointPositionByIndex(index);
+          const screenPos = spacePos ? state.graph.spaceToScreenPosition(spacePos) : undefined;
+          const baseR = state.graph.getPointScreenRadiusByIndex(index);
+          if (screenPos && Number.isFinite(baseR)) {
+            const [x, y] = screenPos;
+            const r = (baseR || 0) * 1.5 + 6;
+            focusRingCircle.setAttribute("cx", String(x));
+            focusRingCircle.setAttribute("cy", String(y));
+            focusRingCircle.setAttribute("r", String(r));
+          }
+        } else if (focusRingCircle) {
+          focusRingCircle.setAttribute("r", "0");
+        }
+
+        function updateRings(groupEl, on) {
+          if (!on || !groupEl) return;
+          for (const el of groupEl.children) {
+            const idx = Number(el.getAttribute("data-idx"));
+            if (!Number.isFinite(idx)) continue;
+            const spacePos = state.graph.getPointPositionByIndex(idx);
+            const screenPos = spacePos ? state.graph.spaceToScreenPosition(spacePos) : undefined;
+            const baseR = state.graph.getPointScreenRadiusByIndex(idx);
+            if (!screenPos || !Number.isFinite(baseR)) continue;
+            const [x, y] = screenPos;
+            const r = (baseR || 0) * 1.2 + 4;
+            el.setAttribute("cx", String(x));
+            el.setAttribute("cy", String(y));
+            el.setAttribute("r", String(r));
+          }
+        }
+
+        updateRings(envRingsGroup, envOn);
+        updateRings(coreRingsGroup, coreOn);
+        updateRings(peripheryRingsGroup, peripheryOn);
+        focusRingRaf = requestAnimationFrame(tick);
+      };
+      if (!focusRingRaf) focusRingRaf = requestAnimationFrame(tick);
+    }
+
+    function showLinkToastAt(text, x, y) {
+      if (!linkToast) return;
+      linkToast.textContent = text;
+      linkToast.classList.add("active");
+      // Position near cursor, then clamp after measuring actual size
+      const pad = 12;
+      linkToast.style.left = `${x + pad}px`;
+      linkToast.style.top = `${y + pad}px`;
+      requestAnimationFrame(() => {
+        if (!linkToast.classList.contains("active")) return;
+        const rect = linkToast.getBoundingClientRect();
+        const left = Math.min(Math.max(pad, x + pad), window.innerWidth - rect.width - pad);
+        const top = Math.min(Math.max(pad, y + pad), window.innerHeight - rect.height - pad);
+        linkToast.style.left = `${left}px`;
+        linkToast.style.top = `${top}px`;
+      });
+      if (linkToastTimer) window.clearTimeout(linkToastTimer);
+      linkToastTimer = window.setTimeout(() => {
+        linkToast.classList.remove("active");
+      }, 2500);
+    }
+
     async function buildGraph({ reloadData = false } = {}) {
       const container = document.getElementById("graph");
       
       // Единый диапазон размеров для всех узлов (независимо от команды/окружения)
-      const sizeRange = [2 * state.nodeSizeScale, 14 * state.nodeSizeScale];
-      const widthRange = [0.2 * state.edgeWidthScale, 3 * state.edgeWidthScale];
+      const sizeRange = [3 * state.nodeSizeScale, 14 * state.nodeSizeScale];
+      // Edge width is quantized by weight buckets (see linkWidthByFn below),
+      // and then scaled by the slider value (edgeWidthScale).
+
+      function edgeWidthLevel(weight) {
+        const w = typeof weight === "number" ? weight : Number(weight) || 0;
+        if (w <= 0) return 0.8;
+        if (w === 1) return 1.1;
+        if (w === 2) return 1.6;
+        if (w <= 4) return 2.0;      // 3-4
+        if (w <= 8) return 2.8;      // 5-8
+        if (w <= 16) return 3.2;     // 9-16
+        if (w <= 32) return 4.0;     // 17-32
+        return 3.6;                  // 33+
+      }
       
       const config = {
         points: state.nodes,
@@ -642,9 +1152,9 @@
         linkTargetBy: "target",
         linkSourceIndexBy: "sourceIndex",
         linkTargetIndexBy: "targetIndex",
-        linkWidthBy: "enhancedWeight",
-        linkWidthRange: widthRange,
-        linkWidthStrategy: "auto",
+        linkWidthBy: "weight",
+        linkWidthByFn: (value) => edgeWidthLevel(value) * state.edgeWidthScale,
+        linkWidthStrategy: "direct",
         linkColorBy: "pair",
         linkColorByFn: (pair) => {
           if (!pair) return colors.link;
@@ -684,6 +1194,33 @@
         unknownColor: colors.link,
         preservePointPositionsOnDataUpdate: true,
         selectPointOnClick: true,
+        // Disable built-in focus ring; we draw our own animated ring overlay
+        focusPointOnClick: false,
+        focusPointOnLabelClick: false,
+        onPointClick: (index) => {
+          if (typeof index !== "number") return;
+          showNodeInfoByIndex(index);
+        },
+        onLinkClick: (linkIndex, event) => {
+          const e = state.edges?.[linkIndex];
+          if (!e) {
+            showLinkToastAt(`Ребро #${linkIndex}`, event?.clientX ?? 12, event?.clientY ?? 12);
+            return;
+          }
+          const sIdx = state.nodeIndexById.get(String(e.source));
+          const tIdx = state.nodeIndexById.get(String(e.target));
+          const sName = typeof sIdx === "number" ? (state.nodes[sIdx]?.label || String(e.source)) : String(e.source);
+          const tName = typeof tIdx === "number" ? (state.nodes[tIdx]?.label || String(e.target)) : String(e.target);
+          const w = e.weight;
+          const text = Number.isFinite(w) ? `${sName} — ${tName}\nвес: ${w}` : `${sName} — ${tName}`;
+          const x = event?.clientX ?? 12;
+          const y = event?.clientY ?? 12;
+          showLinkToastAt(text, x, y);
+        },
+        onLabelClick: (index) => {
+          if (typeof index !== "number") return;
+          showNodeInfoByIndex(index);
+        },
       };
 
       if (!state.graph) {
@@ -691,13 +1228,57 @@
         state.controls.fit = new CosmographButtonFitView(state.graph, document.getElementById("fitControl"));
         state.controls.zoom = new CosmographButtonZoomInOut(state.graph, document.getElementById("zoomControl"));
         await state.graph.dataUploaded();
+        // When a graph is (re)created, simulation should be running by default.
+        state.simulationPaused = false;
+        try {
+          state.graph.unpause();
+        } catch (e) {
+          // ignore - depends on Cosmograph internals
+        }
         hidePlaceholder();
+        updateFocusRing();
+        syncPlayPauseButton();
+        // After the graph becomes visible, auto-fit view once (delayed).
+        if (fitViewTimer) window.clearTimeout(fitViewTimer);
+        const graphRef = state.graph;
+        fitViewTimer = window.setTimeout(() => {
+          if (state.graph !== graphRef) return;
+          try {
+            state.graph?.fitView?.();
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to fit view", e);
+          }
+        }, 4000);
       } else {
         // Keep `points`/`links` in config on every update to avoid Cosmograph dropping local tables.
         // When `points`/`links` references are unchanged, Cosmograph will update visual properties (e.g. colors)
         // without re-uploading data.
         await state.graph.setConfig(config);
+        if (reloadData) {
+          await state.graph.dataUploaded();
+          // Switching team / reloading data should auto-start the simulation.
+          state.simulationPaused = false;
+          try {
+            state.graph.unpause();
+          } catch (e) {
+            // ignore - depends on Cosmograph internals
+          }
+        }
         hidePlaceholder();
+        updateFocusRing();
+        syncPlayPauseButton();
+        if (reloadData) {
+          if (fitViewTimer) window.clearTimeout(fitViewTimer);
+          const graphRef = state.graph;
+          fitViewTimer = window.setTimeout(() => {
+            if (state.graph !== graphRef) return;
+            try {
+              state.graph?.fitView?.();
+            } catch (e) {
+              console.warn("[Teams Explorer] Failed to fit view", e);
+            }
+          }, 4000);
+        }
       }
     }
 
@@ -722,7 +1303,11 @@
           state.controls = {};
           document.getElementById("fitControl").innerHTML = "";
           document.getElementById("zoomControl").innerHTML = "";
+          if (fitViewTimer) window.clearTimeout(fitViewTimer);
+          fitViewTimer = null;
         }
+        state.simulationPaused = false;
+        syncPlayPauseButton();
         showPlaceholder();
         teamTitle.textContent = "–";
         authorsList.innerHTML = "";
@@ -757,6 +1342,7 @@
             <div class="status">${a.status}</div>
           </div>
         `;
+        item.addEventListener("click", () => focusPointByAuthorId(a.id));
         authorsList.appendChild(item);
       });
     }
@@ -824,33 +1410,21 @@
 
     function toggleSimulation() {
       if (!state.graph) return;
-      if (state.graph.isSimulationRunning) {
-        state.graph.pause();
-        playPauseBtn.textContent = "Запустить";
-      } else {
+      if (state.simulationPaused) {
         state.graph.unpause();
-        playPauseBtn.textContent = "Пауза";
+        state.simulationPaused = false;
+      } else {
+        state.graph.pause();
+        state.simulationPaused = true;
       }
+      syncPlayPauseButton();
     }
 
     periodSelect.addEventListener("change", async () => {
       state.selectedPeriod = periodSelect.value;
-      if (state.graph) {
-        try {
-          await state.graph.destroy();
-        } catch (e) {
-          console.warn("[Teams Explorer] Failed to destroy graph", e);
-        }
-        state.graph = null;
-        state.controls.fit?.remove?.();
-        state.controls.zoom?.remove?.();
-        state.controls = {};
-        document.getElementById("fitControl").innerHTML = "";
-        document.getElementById("zoomControl").innerHTML = "";
-        showPlaceholder();
-      }
       await loadTeams();
-      await loadGraph();
+      // IMPORTANT: do not rebuild/reload the full graph on period change.
+      // The graph will update only when the user selects a team (team graph) or explicitly resets to full graph elsewhere.
       teamTitle.textContent = "–";
       authorsList.innerHTML = "";
       pubsList.innerHTML = "";
@@ -865,12 +1439,32 @@
       await loadTeams();
       state.teamMembers.clear();
       state.selectedTeam = null;
+      state.focusedPointIndex = null;
       teamTitle.textContent = "–";
       authorsList.innerHTML = "";
       pubsList.innerHTML = "";
       renderTeams();
-      // Возвращаемся к полному графу
-      await loadGraph();
+      // IMPORTANT: do not rebuild/reload any graph on reset.
+      // Also clear the currently shown graph to avoid stale team graph.
+      if (state.graph) {
+        try {
+          await state.graph.destroy();
+        } catch (e) {
+          console.warn("[Teams Explorer] Failed to destroy graph", e);
+        }
+        state.graph = null;
+        state.controls.fit?.remove?.();
+        state.controls.zoom?.remove?.();
+        state.controls = {};
+        document.getElementById("fitControl").innerHTML = "";
+        document.getElementById("zoomControl").innerHTML = "";
+        if (fitViewTimer) window.clearTimeout(fitViewTimer);
+        fitViewTimer = null;
+      }
+      state.simulationPaused = false;
+      syncPlayPauseButton();
+      showPlaceholder();
+      updateFocusRing();
       authorSearch.focus();
     });
     authorSearch.addEventListener("keydown", (e) => {
@@ -891,11 +1485,40 @@
       if (e.target === settingsModal) toggleModal(false);
     });
 
+    nodeTeamsBtn.addEventListener("click", async () => {
+      nodeTeamsState.isOpen = !nodeTeamsState.isOpen;
+      renderNodeTeams();
+      if (nodeTeamsState.isOpen) {
+        await loadAuthorTeams(nodeTeamsState.authorId);
+      }
+    });
+
+    hideNodeInfoBtn.addEventListener("click", () => toggleNodeInfo(false));
+
+    toggleEnvRingsBtn.addEventListener("click", () => {
+      state.envRingsEnabled = !state.envRingsEnabled;
+      toggleEnvRingsBtn.textContent = state.envRingsEnabled ? "Окружение: выкл" : "Окружение";
+      updateFocusRing();
+    });
+
+    toggleCoreRingsBtn.addEventListener("click", () => {
+      state.coreRingsEnabled = !state.coreRingsEnabled;
+      toggleCoreRingsBtn.textContent = state.coreRingsEnabled ? "core: выкл" : "core";
+      updateFocusRing();
+    });
+
+    togglePeripheryRingsBtn.addEventListener("click", () => {
+      state.peripheryRingsEnabled = !state.peripheryRingsEnabled;
+      togglePeripheryRingsBtn.textContent = state.peripheryRingsEnabled ? "periphery: выкл" : "periphery";
+      updateFocusRing();
+    });
+
     (async function init() {
       await loadPeriods();
       await loadTeams();
       settingInputs.includeSinglePub.checked = state.includeSinglePub;
       showPlaceholder();
+      syncPlayPauseButton();
     })();
   </script>
 </body>

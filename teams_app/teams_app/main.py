@@ -364,6 +364,80 @@ async def get_team_detail(
     return JSONResponse(response)
 
 
+@app.get("/api/authors/{author_id}/teams")
+async def get_author_teams(
+    author_id: str,
+    period: str = Query(..., description="Sliding window period, e.g. 2023-2025"),
+) -> JSONResponse:
+    """
+    Return list of teams (in a given period) where the author is a member.
+    This is used by the frontend 'author info' popup.
+    """
+    _, _ = parse_period(period)
+    sql = """
+        WITH team_members AS (
+            SELECT period, team_id, author_id, status
+            FROM teams
+            WHERE period = ?
+        ),
+        team_stats AS (
+            SELECT
+                period,
+                team_id,
+                COUNT(*) AS authors_count,
+                SUM(CASE WHEN status = 'core' THEN 1 ELSE 0 END) AS core_count,
+                SUM(CASE WHEN status = 'periphery' THEN 1 ELSE 0 END) AS periphery_count
+            FROM team_members
+            GROUP BY period, team_id
+        ),
+        author_teams AS (
+            SELECT DISTINCT tm.team_id, tm.status AS author_status
+            FROM team_members tm
+            WHERE tm.author_id = ?
+        )
+        SELECT
+            aut.team_id,
+            aut.author_status,
+            ts.authors_count,
+            ts.core_count,
+            ts.periphery_count,
+            COALESCE(
+                string_agg(
+                    DISTINCT a.lastname || ' ' || COALESCE(a.givenname, ''),
+                    ', '
+                ),
+                ''
+            ) AS sample_authors
+        FROM author_teams aut
+        JOIN team_stats ts ON ts.team_id = aut.team_id AND ts.period = ?
+        LEFT JOIN LATERAL (
+            SELECT a.lastname, a.givenname
+            FROM team_members tm
+            JOIN authors a ON a.id = tm.author_id
+            WHERE tm.period = ? AND tm.team_id = aut.team_id
+            ORDER BY (tm.status = 'periphery'), a.lastname
+            LIMIT 3
+        ) a ON true
+        GROUP BY aut.team_id, aut.author_status, ts.authors_count, ts.core_count, ts.periphery_count
+        ORDER BY aut.team_id;
+    """
+    params: list[Any] = [period, str(author_id), period, period]
+    with connect() as con:
+        rows = con.execute(sql, params).fetchall()
+    teams = [
+        {
+            "team_id": int(row[0]),
+            "author_status": row[1] or "core",
+            "authors_count": int(row[2]),
+            "core_count": int(row[3]),
+            "periphery_count": int(row[4]),
+            "sample_authors": row[5],
+        }
+        for row in rows
+    ]
+    return JSONResponse({"author_id": str(author_id), "period": period, "teams": teams})
+
+
 @app.get("/api/teams/{team_id}/graph")
 async def get_team_graph(
     team_id: int,
