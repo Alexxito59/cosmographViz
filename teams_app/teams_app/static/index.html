@@ -458,6 +458,13 @@
           <button id="clearSearchBtn" style="background:#e9e9ee; color:#1f1f26; box-shadow:none;">Сброс</button>
         </div>
       </div>
+      <div class="control">
+        <label for="sortSelect">Сортировка списка команд</label>
+        <select id="sortSelect" style="font-size: 12px;">
+          <option value="desc">↓ По убыванию</option>
+          <option value="asc">↑ По вместо</option>
+        </select>
+      </div>
       <div class="split">
         <h2>Список команд</h2>
         <div id="teamsList" class="list"></div>
@@ -607,6 +614,7 @@
       coreRingIndices: [],
       peripheryRingsEnabled: false,
       peripheryRingIndices: [],
+      sortOrder: "desc", // "asc" или "desc" для сортировки по количеству членов
       // We control the UI state for play/pause ourselves because Cosmograph's
       // `isSimulationRunning` can be transient/out-of-sync during data reloads.
       simulationPaused: false,
@@ -633,6 +641,7 @@
     const authorSearch = document.getElementById("authorSearch");
     const searchBtn = document.getElementById("searchBtn");
     const clearSearchBtn = document.getElementById("clearSearchBtn");
+    const sortSelect = document.getElementById("sortSelect");
     const teamsList = document.getElementById("teamsList");
     const authorsList = document.getElementById("authorsList");
     const pubsList = document.getElementById("pubsList");
@@ -861,7 +870,15 @@
         teamsList.innerHTML = '<div class="empty">Нет команд</div>';
         return;
       }
-      state.teams.forEach((team) => {
+      // Сортировка команд по количеству членов
+      const sortedTeams = [...state.teams].sort((a, b) => {
+        if (state.sortOrder === "asc") {
+          return a.authors_count - b.authors_count;
+        } else {
+          return b.authors_count - a.authors_count;
+        }
+      });
+      sortedTeams.forEach((team) => {
         const item = document.createElement("div");
         item.className = "team-item" + (state.selectedTeam === team.team_id ? " active" : "");
         item.innerHTML = `
@@ -887,12 +904,24 @@
         showPlaceholder();
         return;
       }
+      const totalStart = performance.now();
+      console.log(`[PERF] Starting graph load: period=${state.selectedPeriod}, max_authors=${state.maxAuthorsPerDoc}`);
+      
       const qs = new URLSearchParams({
         period: state.selectedPeriod,
         max_authors_per_doc: String(state.maxAuthorsPerDoc),
         include_single_pub: state.includeSinglePub ? "true" : "false",
       });
+      
+      const fetchStart = performance.now();
       const data = await fetchJson(`/api/graph?${qs.toString()}`);
+      const fetchTime = performance.now() - fetchStart;
+      console.log(`[PERF] Fetch time: ${fetchTime.toFixed(2)}ms, nodes: ${data.nodes?.length || 0}, edges: ${data.edges?.length || 0}`);
+      if (data._perf) {
+        console.log(`[PERF] Backend times:`, data._perf);
+      }
+      
+      const processStart = performance.now();
       state.nodes = (data.nodes || []).map((n, idx) => ({
         ...n,
         idx,
@@ -919,7 +948,16 @@
         targetIndex: indexById.get(e.target) ?? -1,
         pair: `${e.source}|${e.target}`,
       }));
+      const processTime = performance.now() - processStart;
+      console.log(`[PERF] Data processing: ${processTime.toFixed(2)}ms`);
+      
+      const buildStart = performance.now();
       await buildGraph({ reloadData: true });
+      const buildTime = performance.now() - buildStart;
+      console.log(`[PERF] Graph build: ${buildTime.toFixed(2)}ms`);
+      
+      const totalTime = performance.now() - totalStart;
+      console.log(`[PERF] Total graph load time: ${totalTime.toFixed(2)}ms`);
     }
 
     async function loadTeamGraph(teamId) {
@@ -928,17 +966,27 @@
         return;
       }
       try {
-        console.log(`[Teams Explorer] Loading graph for team ${teamId}, period ${state.selectedPeriod}`);
+        const totalStart = performance.now();
+        console.log(`[PERF] Loading team graph: team=${teamId}, period=${state.selectedPeriod}`);
+        
         const qs = new URLSearchParams({
           period: state.selectedPeriod,
           max_authors_per_doc: String(state.maxAuthorsPerDoc),
         });
+        
+        const fetchStart = performance.now();
         const data = await fetchJson(`/api/teams/${teamId}/graph?${qs.toString()}`);
+        const fetchTime = performance.now() - fetchStart;
+        console.log(`[PERF] Team fetch time: ${fetchTime.toFixed(2)}ms, nodes: ${data.nodes?.length || 0}, edges: ${data.edges?.length || 0}`);
+        if (data._perf) {
+          console.log(`[PERF] Backend times:`, data._perf);
+        }
         
         const teamNodes = (data.nodes || []).filter((n) => n.status);
         const envNodes = (data.nodes || []).filter((n) => !n.status);
-        console.log(`[Teams Explorer] Loaded ${teamNodes.length} team nodes, ${envNodes.length} environment nodes`);
+        console.log(`[PERF] Team nodes: ${teamNodes.length}, environment nodes: ${envNodes.length}`);
         
+        const processStart = performance.now();
         state.nodes = (data.nodes || []).map((n, idx) => ({
           ...n,
           idx,
@@ -965,8 +1013,16 @@
           targetIndex: indexById.get(e.target) ?? -1,
           pair: `${e.source}|${e.target}`,
         }));
-        console.log(`[Teams Explorer] Loaded ${state.edges.length} edges`);
+        const processTime = performance.now() - processStart;
+        console.log(`[PERF] Team data processing: ${processTime.toFixed(2)}ms, edges: ${state.edges.length}`);
+        
+        const buildStart = performance.now();
         await buildGraph({ reloadData: true });
+        const buildTime = performance.now() - buildStart;
+        console.log(`[PERF] Team graph build: ${buildTime.toFixed(2)}ms`);
+        
+        const totalTime = performance.now() - totalStart;
+        console.log(`[PERF] Total team graph load time: ${totalTime.toFixed(2)}ms`);
       } catch (error) {
         console.error(`[Teams Explorer] Error loading team graph:`, error);
         throw error;
@@ -1120,6 +1176,42 @@
         return 3.6;                  // 33+
       }
       
+      // Оптимизация: используем Map/кэш только для больших графов (>100 узлов)
+      // Для маленьких графов простая проверка быстрее
+      const useOptimization = state.nodes.length > 100;
+      
+      let nodeMapById = null;
+      let nodeColorCache = null;
+      
+      if (useOptimization) {
+        const nodeMapStart = performance.now();
+        nodeMapById = new Map(state.nodes.map((n) => [String(n.id), n]));
+        const nodeMapTime = performance.now() - nodeMapStart;
+        console.log(`[PERF] Node map creation: ${nodeMapTime.toFixed(2)}ms`);
+        
+        // Предвычисляем цвета узлов для кэширования
+        const nodeColorCacheStart = performance.now();
+        nodeColorCache = new Map();
+        for (const node of state.nodes) {
+          const id = String(node.id);
+          let color = colors.neutral;
+          if (node.status) {
+            color = node.status === "core" ? colors.core : colors.periphery;
+          } else if (node.status === null) {
+            // Явно окружение (status = null)
+            color = colors.environment;
+          } else {
+            // Проверяем teamMembers для полного графа
+            const status = state.teamMembers.get(id);
+            if (status === "core") color = colors.core;
+            else if (status === "periphery") color = colors.periphery;
+          }
+          nodeColorCache.set(id, color);
+        }
+        const nodeColorCacheTime = performance.now() - nodeColorCacheStart;
+        console.log(`[PERF] Node color cache: ${nodeColorCacheTime.toFixed(2)}ms`);
+      }
+      
       const config = {
         points: state.nodes,
         pointIdBy: "id",
@@ -1130,18 +1222,19 @@
         pointSizeRange: sizeRange,
         pointColorBy: "id",
         pointColorByFn: (id) => {
-          // Сначала проверяем статус из данных узла (для графа команды с окружением)
-          const node = state.nodes.find((n) => n.id === String(id));
-          if (node?.status) {
-            // Команда: зелёный для core, синий для periphery
-            if (node.status === "core") return colors.core;
-            if (node.status === "periphery") return colors.periphery;
+          if (useOptimization && nodeColorCache) {
+            // Используем кэш для больших графов
+            return nodeColorCache.get(String(id)) || colors.neutral;
           }
-          // Окружение: жёлтый цвет
-          if (node && !node.status) {
+          // Для маленьких графов - простая проверка без кэша
+          const node = state.nodes.find((n) => n.id === String(id));
+          if (!node) return colors.neutral;
+          if (node.status) {
+            return node.status === "core" ? colors.core : colors.periphery;
+          }
+          if (node.status === null) {
             return colors.environment;
           }
-          // Затем проверяем teamMembers (для подсветки в полном графе)
           const status = state.teamMembers.get(String(id));
           if (status === "core") return colors.core;
           if (status === "periphery") return colors.periphery;
@@ -1159,19 +1252,30 @@
         linkColorByFn: (pair) => {
           if (!pair) return colors.link;
           const [source, target] = String(pair).split("|");
-          const sourceNode = state.nodes.find((n) => n.id === source);
-          const targetNode = state.nodes.find((n) => n.id === target);
+          
+          let sourceNode, targetNode;
+          if (useOptimization && nodeMapById) {
+            // Используем Map для больших графов
+            sourceNode = nodeMapById.get(source);
+            targetNode = nodeMapById.get(target);
+          } else {
+            // Для маленьких графов - простой поиск
+            sourceNode = state.nodes.find((n) => n.id === source);
+            targetNode = state.nodes.find((n) => n.id === target);
+          }
+          
+          if (!sourceNode || !targetNode) return colors.link;
           
           // Если оба автора в команде (имеют status), зелёный цвет
-          if (sourceNode?.status && targetNode?.status) {
+          if (sourceNode.status && targetNode.status) {
             return colors.core;
           }
           // Если один в команде, другой в окружении, оранжевый
-          if ((sourceNode?.status && !targetNode?.status) || (!sourceNode?.status && targetNode?.status)) {
+          if ((sourceNode.status && !targetNode.status) || (!sourceNode.status && targetNode.status)) {
             return colors.environment;
           }
           // Если оба в окружении, серый
-          if (!sourceNode?.status && !targetNode?.status) {
+          if (!sourceNode.status && !targetNode.status) {
             return colors.link;
           }
           // Для полного графа (старая логика)
@@ -1224,10 +1328,19 @@
       };
 
       if (!state.graph) {
+        const createStart = performance.now();
         state.graph = new Cosmograph(container, config);
+        const createTime = performance.now() - createStart;
+        console.log(`[PERF] Cosmograph creation: ${createTime.toFixed(2)}ms`);
+        
         state.controls.fit = new CosmographButtonFitView(state.graph, document.getElementById("fitControl"));
         state.controls.zoom = new CosmographButtonZoomInOut(state.graph, document.getElementById("zoomControl"));
+        
+        const uploadStart = performance.now();
         await state.graph.dataUploaded();
+        const uploadTime = performance.now() - uploadStart;
+        console.log(`[PERF] Cosmograph data upload: ${uploadTime.toFixed(2)}ms`);
+        
         // When a graph is (re)created, simulation should be running by default.
         state.simulationPaused = false;
         try {
@@ -1253,9 +1366,17 @@
         // Keep `points`/`links` in config on every update to avoid Cosmograph dropping local tables.
         // When `points`/`links` references are unchanged, Cosmograph will update visual properties (e.g. colors)
         // without re-uploading data.
+        const setConfigStart = performance.now();
         await state.graph.setConfig(config);
+        const setConfigTime = performance.now() - setConfigStart;
+        console.log(`[PERF] Cosmograph setConfig: ${setConfigTime.toFixed(2)}ms`);
+        
         if (reloadData) {
+          const uploadStart = performance.now();
           await state.graph.dataUploaded();
+          const uploadTime = performance.now() - uploadStart;
+          console.log(`[PERF] Cosmograph data upload (reload): ${uploadTime.toFixed(2)}ms`);
+          
           // Switching team / reloading data should auto-start the simulation.
           state.simulationPaused = false;
           try {
@@ -1430,6 +1551,11 @@
       pubsList.innerHTML = "";
       state.teamMembers.clear();
       state.selectedTeam = null;
+      renderTeams();
+    });
+
+    sortSelect.addEventListener("change", () => {
+      state.sortOrder = sortSelect.value;
       renderTeams();
     });
 

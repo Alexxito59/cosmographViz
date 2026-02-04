@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+# Настройка логирования для детального анализа производительности
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 APP_DIR = Path(__file__).resolve().parent
@@ -154,9 +160,13 @@ async def get_graph(
         False,
         description="Include authors with exactly 1 publication in the period (by default they are excluded).",
     ),
+    explain: bool = Query(False, description="Return EXPLAIN ANALYZE for SQL queries (for debugging)"),
 ) -> JSONResponse:
+    total_start = time.perf_counter()
     start_year, end_year = parse_period(period)
     min_pubs = 1 if include_single_pub else 2
+    
+    logger.info(f"[PERF] Starting graph load: period={period}, max_authors={max_authors_per_doc}, include_single={include_single_pub}")
     sql = """
         WITH period_docs AS (
             SELECT eid, year
@@ -242,12 +252,46 @@ async def get_graph(
         GROUP BY source, target;
     """
     with connect() as con:
+        # Анализ запроса узлов
+        if explain:
+            logger.info("[PERF] EXPLAIN ANALYZE for nodes query:")
+            # Подставляем параметры для EXPLAIN ANALYZE
+            explain_sql = sql.replace("?", str(start_year)).replace("?", str(end_year)).replace("?", str(max_authors_per_doc)).replace("?", str(max_authors_per_doc)).replace("?", str(min_pubs))
+            try:
+                explain_nodes = con.execute(f"EXPLAIN ANALYZE {explain_sql}").fetchall()
+                for row in explain_nodes:
+                    logger.info(f"[PERF] {row[0]}")
+            except Exception as e:
+                logger.warning(f"[PERF] Failed to get EXPLAIN ANALYZE: {e}")
+        
+        node_query_start = time.perf_counter()
         node_rows = con.execute(
             sql, [start_year, end_year, max_authors_per_doc, max_authors_per_doc, min_pubs]
         ).fetchall()
+        node_query_time = time.perf_counter() - node_query_start
+        logger.info(f"[PERF] Nodes query: {node_query_time:.3f}s, rows: {len(node_rows)}")
+        
+        # Анализ запроса рёбер
+        if explain:
+            logger.info("[PERF] EXPLAIN ANALYZE for edges query:")
+            # Подставляем параметры для EXPLAIN ANALYZE
+            explain_edges_sql = edges_sql.replace("?", str(start_year)).replace("?", str(end_year)).replace("?", str(max_authors_per_doc)).replace("?", str(max_authors_per_doc)).replace("?", str(min_pubs))
+            try:
+                explain_edges = con.execute(f"EXPLAIN ANALYZE {explain_edges_sql}").fetchall()
+                for row in explain_edges:
+                    logger.info(f"[PERF] {row[0]}")
+            except Exception as e:
+                logger.warning(f"[PERF] Failed to get EXPLAIN ANALYZE: {e}")
+        
+        edge_query_start = time.perf_counter()
         edge_rows = con.execute(
             edges_sql, [start_year, end_year, max_authors_per_doc, max_authors_per_doc, min_pubs]
         ).fetchall()
+        edge_query_time = time.perf_counter() - edge_query_start
+        logger.info(f"[PERF] Edges query: {edge_query_time:.3f}s, rows: {len(edge_rows)}")
+    
+    # Обработка данных узлов
+    nodes_process_start = time.perf_counter()
     nodes = [
         {
             "id": str(row[0]),
@@ -257,6 +301,11 @@ async def get_graph(
         }
         for row in node_rows
     ]
+    nodes_process_time = time.perf_counter() - nodes_process_start
+    logger.info(f"[PERF] Nodes processing: {nodes_process_time:.3f}s")
+    
+    # Обработка данных рёбер
+    edges_process_start = time.perf_counter()
     edges = [
         {
             "source": str(row[0]),
@@ -265,7 +314,26 @@ async def get_graph(
         }
         for row in edge_rows
     ]
-    return JSONResponse({"nodes": nodes, "edges": edges})
+    edges_process_time = time.perf_counter() - edges_process_start
+    logger.info(f"[PERF] Edges processing: {edges_process_time:.3f}s")
+    
+    # Сериализация JSON
+    json_serialize_start = time.perf_counter()
+    response_data = {"nodes": nodes, "edges": edges}
+    if explain:
+        response_data["_perf"] = {
+            "node_query_time": node_query_time,
+            "edge_query_time": edge_query_time,
+            "nodes_process_time": nodes_process_time,
+            "edges_process_time": edges_process_time,
+        }
+    json_serialize_time = time.perf_counter() - json_serialize_start
+    logger.info(f"[PERF] JSON serialization: {json_serialize_time:.3f}s")
+    
+    total_time = time.perf_counter() - total_start
+    logger.info(f"[PERF] Total graph load time: {total_time:.3f}s (nodes: {len(nodes)}, edges: {len(edges)})")
+    
+    return JSONResponse(response_data)
 
 
 @app.get("/api/teams/{team_id}")
@@ -448,9 +516,11 @@ async def get_team_graph(
         le=2000,
         description="Exclude documents with more than this many authors (0 = no limit).",
     ),
+    explain: bool = Query(False, description="Return EXPLAIN ANALYZE for SQL queries (for debugging)"),
 ) -> JSONResponse:
     try:
-        logger.info(f"Loading graph for team {team_id}, period {period}")
+        total_start = time.perf_counter()
+        logger.info(f"[PERF] Loading graph for team {team_id}, period {period}")
         start_year, end_year = parse_period(period)
         
         # SQL для получения узлов: команда + окружение
@@ -558,18 +628,46 @@ async def get_team_graph(
         """
         
         with connect() as con:
-            logger.debug(f"Executing nodes query for team {team_id}")
+            # Анализ запроса узлов
+            if explain:
+                logger.info("[PERF] EXPLAIN ANALYZE for team nodes query:")
+                # Подставляем параметры для EXPLAIN ANALYZE (осторожно с типами)
+                explain_nodes_sql = nodes_sql.replace("?", f"'{period}'").replace("?", str(team_id)).replace("?", str(start_year)).replace("?", str(end_year)).replace("?", str(max_authors_per_doc)).replace("?", str(max_authors_per_doc))
+                try:
+                    explain_nodes = con.execute(f"EXPLAIN ANALYZE {explain_nodes_sql}").fetchall()
+                    for row in explain_nodes:
+                        logger.info(f"[PERF] {row[0]}")
+                except Exception as e:
+                    logger.warning(f"[PERF] Failed to get EXPLAIN ANALYZE: {e}")
+            
+            node_query_start = time.perf_counter()
             node_rows = con.execute(
                 nodes_sql, [period, team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
             ).fetchall()
-            logger.debug(f"Found {len(node_rows)} nodes")
+            node_query_time = time.perf_counter() - node_query_start
+            logger.info(f"[PERF] Team nodes query: {node_query_time:.3f}s, rows: {len(node_rows)}")
             
-            logger.debug(f"Executing edges query for team {team_id}")
+            # Анализ запроса рёбер
+            if explain:
+                logger.info("[PERF] EXPLAIN ANALYZE for team edges query:")
+                # Подставляем параметры для EXPLAIN ANALYZE (осторожно с типами)
+                explain_edges_sql = edges_sql.replace("?", f"'{period}'").replace("?", str(team_id)).replace("?", str(start_year)).replace("?", str(end_year)).replace("?", str(max_authors_per_doc)).replace("?", str(max_authors_per_doc))
+                try:
+                    explain_edges = con.execute(f"EXPLAIN ANALYZE {explain_edges_sql}").fetchall()
+                    for row in explain_edges:
+                        logger.info(f"[PERF] {row[0]}")
+                except Exception as e:
+                    logger.warning(f"[PERF] Failed to get EXPLAIN ANALYZE: {e}")
+            
+            edge_query_start = time.perf_counter()
             edge_rows = con.execute(
                 edges_sql, [period, team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
             ).fetchall()
-            logger.debug(f"Found {len(edge_rows)} edges")
+            edge_query_time = time.perf_counter() - edge_query_start
+            logger.info(f"[PERF] Team edges query: {edge_query_time:.3f}s, rows: {len(edge_rows)}")
         
+        # Обработка данных узлов
+        nodes_process_start = time.perf_counter()
         nodes = []
         team_count = 0
         environment_count = 0
@@ -592,8 +690,11 @@ async def get_team_graph(
             else:
                 environment_count += 1
         
-        logger.info(f"Team {team_id}: {team_count} team members, {environment_count} environment nodes")
+        nodes_process_time = time.perf_counter() - nodes_process_start
+        logger.info(f"[PERF] Team nodes processing: {nodes_process_time:.3f}s ({team_count} team, {environment_count} env)")
         
+        # Обработка данных рёбер
+        edges_process_start = time.perf_counter()
         edges = [
             {
                 "source": str(row[0]),
@@ -602,8 +703,26 @@ async def get_team_graph(
             }
             for row in edge_rows
         ]
+        edges_process_time = time.perf_counter() - edges_process_start
+        logger.info(f"[PERF] Team edges processing: {edges_process_time:.3f}s")
         
-        return JSONResponse({"nodes": nodes, "edges": edges})
+        # Сериализация JSON
+        json_serialize_start = time.perf_counter()
+        response_data = {"nodes": nodes, "edges": edges}
+        if explain:
+            response_data["_perf"] = {
+                "node_query_time": node_query_time,
+                "edge_query_time": edge_query_time,
+                "nodes_process_time": nodes_process_time,
+                "edges_process_time": edges_process_time,
+            }
+        json_serialize_time = time.perf_counter() - json_serialize_start
+        logger.info(f"[PERF] Team JSON serialization: {json_serialize_time:.3f}s")
+        
+        total_time = time.perf_counter() - total_start
+        logger.info(f"[PERF] Total team graph load time: {total_time:.3f}s (nodes: {len(nodes)}, edges: {len(edges)})")
+        
+        return JSONResponse(response_data)
         
     except Exception as e:
         logger.error(f"Error loading graph for team {team_id}, period {period}: {e}", exc_info=True)
