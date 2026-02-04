@@ -515,6 +515,220 @@ async def get_publication_detail(
     return JSONResponse(response)
 
 
+@app.get("/api/teams/multiple/graph")
+async def get_multiple_teams_graph(
+    team_ids: str = Query(..., description="Comma-separated team IDs, e.g. '1,2,3'"),
+    period: str = Query(..., description="Sliding window period for the teams"),
+    max_authors_per_doc: int = Query(
+        100,
+        ge=0,
+        le=2000,
+        description="Exclude documents with more than this many authors (0 = no limit).",
+    ),
+) -> JSONResponse:
+    """
+    Получить объединённый граф для нескольких команд.
+    Для авторов, которые есть в нескольких командах, создаются отдельные узлы
+    с ID вида {author_id}_team_{team_id}, и они соединяются специальными рёбрами.
+    """
+    try:
+        total_start = time.perf_counter()
+        # Парсим список ID команд
+        team_id_list = [int(tid.strip()) for tid in team_ids.split(",") if tid.strip()]
+        if not team_id_list:
+            raise HTTPException(status_code=400, detail="At least one team_id required")
+        
+        logger.info(f"[PERF] Loading graph for teams {team_id_list}, period {period}")
+        start_year, end_year = parse_period(period)
+        
+        # Получаем данные для каждой команды
+        all_nodes = {}  # {node_id: node_data}
+        all_edges = []  # список рёбер соавторства
+        author_to_teams = {}  # {author_id: [team_ids]} - для поиска дубликатов
+        
+        for team_id in team_id_list:
+            # SQL для получения узлов команды
+            nodes_sql = """
+                WITH team_members AS (
+                    SELECT author_id, status
+                    FROM teams
+                    WHERE period = ? AND team_id = ?
+                ),
+                period_docs AS (
+                    SELECT eid, year
+                    FROM docs
+                    WHERE year BETWEEN ? AND ?
+                ),
+                team_docs AS (
+                    SELECT DISTINCT d.eid AS doc_id
+                    FROM period_docs d
+                    JOIN auth_doc ad ON ad.doc_id = d.eid
+                    JOIN team_members tm ON tm.author_id = ad.auth_id
+                ),
+                doc_authors_raw AS (
+                    SELECT DISTINCT td.doc_id, ad.auth_id
+                    FROM team_docs td
+                    JOIN auth_doc ad ON ad.doc_id = td.doc_id
+                ),
+                doc_author_counts AS (
+                    SELECT doc_id, COUNT(*) AS k
+                    FROM doc_authors_raw
+                    GROUP BY doc_id
+                ),
+                doc_authors AS (
+                    SELECT dar.doc_id, dar.auth_id
+                    FROM doc_authors_raw dar
+                    JOIN doc_author_counts dac USING (doc_id)
+                    WHERE (? = 0 OR dac.k <= ?)
+                ),
+                node_stats AS (
+                    SELECT 
+                        da.auth_id,
+                        COUNT(DISTINCT da.doc_id) AS pubs,
+                        MAX(tm.status) AS status
+                    FROM doc_authors da
+                    LEFT JOIN team_members tm ON tm.author_id = da.auth_id
+                    GROUP BY da.auth_id
+                )
+                SELECT
+                    ns.auth_id,
+                    a.lastname,
+                    a.givenname,
+                    ns.pubs,
+                    ns.status
+                FROM node_stats ns
+                LEFT JOIN authors a ON a.id = ns.auth_id
+                ORDER BY ns.status IS NULL, ns.pubs DESC;
+            """
+            
+            # SQL для получения рёбер команды
+            edges_sql = """
+                WITH team_members AS (
+                    SELECT author_id, status
+                    FROM teams
+                    WHERE period = ? AND team_id = ?
+                ),
+                period_docs AS (
+                    SELECT eid, year
+                    FROM docs
+                    WHERE year BETWEEN ? AND ?
+                ),
+                team_docs AS (
+                    SELECT DISTINCT d.eid AS doc_id
+                    FROM period_docs d
+                    JOIN auth_doc ad ON ad.doc_id = d.eid
+                    JOIN team_members tm ON tm.author_id = ad.auth_id
+                ),
+                doc_authors_raw AS (
+                    SELECT DISTINCT td.doc_id, ad.auth_id
+                    FROM team_docs td
+                    JOIN auth_doc ad ON ad.doc_id = td.doc_id
+                ),
+                doc_author_counts AS (
+                    SELECT doc_id, COUNT(*) AS k
+                    FROM doc_authors_raw
+                    GROUP BY doc_id
+                ),
+                doc_authors AS (
+                    SELECT dar.doc_id, dar.auth_id
+                    FROM doc_authors_raw dar
+                    JOIN doc_author_counts dac USING (doc_id)
+                    WHERE (? = 0 OR dac.k <= ?)
+                )
+                SELECT
+                    LEAST(a1.auth_id, a2.auth_id) AS source,
+                    GREATEST(a1.auth_id, a2.auth_id) AS target,
+                    COUNT(DISTINCT a1.doc_id) AS weight
+                FROM doc_authors a1
+                JOIN doc_authors a2
+                    ON a1.doc_id = a2.doc_id AND a1.auth_id < a2.auth_id
+                GROUP BY source, target;
+            """
+            
+            with connect() as con:
+                node_rows = con.execute(
+                    nodes_sql, [period, team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
+                ).fetchall()
+                edge_rows = con.execute(
+                    edges_sql, [period, team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
+                ).fetchall()
+            
+            # Создаём узлы для этой команды (с уникальными ID)
+            for row in node_rows:
+                auth_id = str(row[0])
+                node_id = f"{auth_id}_team_{team_id}"
+                
+                # Отслеживаем, в каких командах автор
+                if auth_id not in author_to_teams:
+                    author_to_teams[auth_id] = []
+                author_to_teams[auth_id].append(team_id)
+                
+                all_nodes[node_id] = {
+                    "id": node_id,
+                    "author_id": auth_id,  # оригинальный ID автора
+                    "team_id": team_id,
+                    "lastname": row[1] or "",
+                    "givenname": row[2] or "",
+                    "pubs": int(row[3]),
+                    "status": row[4] or None,
+                }
+            
+            # Создаём рёбра для этой команды (с уникальными ID узлов)
+            for row in edge_rows:
+                source_auth = str(row[0])
+                target_auth = str(row[1])
+                weight = int(row[2])
+                
+                source_id = f"{source_auth}_team_{team_id}"
+                target_id = f"{target_auth}_team_{team_id}"
+                
+                # Проверяем, что оба узла существуют
+                if source_id in all_nodes and target_id in all_nodes:
+                    all_edges.append({
+                        "source": source_id,
+                        "target": target_id,
+                        "weight": weight,
+                        "type": "collaboration",  # обычное ребро соавторства
+                    })
+        
+        # Создаём специальные рёбра-связи между дубликатами одного автора
+        duplicate_edges = []
+        for author_id, team_list in author_to_teams.items():
+            if len(team_list) > 1:
+                # Автор есть в нескольких командах - соединяем все его дубликаты
+                node_ids = [f"{author_id}_team_{tid}" for tid in team_list]
+                # Создаём рёбра между всеми парами дубликатов
+                for i in range(len(node_ids)):
+                    for j in range(i + 1, len(node_ids)):
+                        duplicate_edges.append({
+                            "source": node_ids[i],
+                            "target": node_ids[j],
+                            "weight": 1,  # фиксированный вес для видимости
+                            "type": "duplicate",  # специальный тип для рёбер-дубликатов
+                        })
+        
+        # Объединяем все рёбра
+        all_edges.extend(duplicate_edges)
+        
+        # Преобразуем узлы в список
+        nodes_list = list(all_nodes.values())
+        
+        total_time = time.perf_counter() - total_start
+        logger.info(f"[PERF] Total multiple teams graph load time: {total_time:.3f}s (nodes: {len(nodes_list)}, edges: {len(all_edges)}, duplicate_edges: {len(duplicate_edges)})")
+        
+        response_data = {
+            "nodes": nodes_list,
+            "edges": all_edges,
+            "teams": team_id_list,
+            "author_duplicates": {auth_id: teams for auth_id, teams in author_to_teams.items() if len(teams) > 1},
+        }
+        return JSONResponse(response_data)
+        
+    except Exception as e:
+        logger.error(f"Error loading graph for multiple teams {team_ids}, period {period}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to load multiple teams graph: {str(e)}")
+
+
 @app.get("/api/authors/{author_id}/teams")
 async def get_author_teams(
     author_id: str,
