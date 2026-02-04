@@ -181,6 +181,40 @@ GET /api/publications/{doc_id}
   }
   SQL: SELECT * FROM docs WHERE eid = ? + запрос авторов публикации
 
+GET /api/teams/multiple/graph
+  Параметры:
+    - team_ids (required query): строка с ID команд через запятую (например, "1,2,3")
+    - period (required query): строка формата "YYYY-YYYY"
+    - max_authors_per_doc (optional, default=100): максимальное количество авторов на документ
+  Описание: Получить объединённый граф для нескольких команд. Для авторов, которые есть
+    в нескольких командах, создаются отдельные узлы с ID вида {author_id}_team_{team_id},
+    и они соединяются специальными рёбрами типа "duplicate".
+  Ответ: JSON {
+    "nodes": [
+      {
+        "id": "author_id_team_team_id",
+        "author_id": "author_id",
+        "team_id": int,
+        "lastname": "Фамилия",
+        "givenname": "Имя",
+        "pubs": int,
+        "status": "core" | "periphery" | null
+      }
+    ],
+    "edges": [
+      {
+        "source": "node_id_1",
+        "target": "node_id_2",
+        "weight": int,
+        "type": "collaboration" | "duplicate"
+      }
+    ],
+    "teams": [int, ...],
+    "author_duplicates": {"author_id": [team_ids]}
+  }
+  SQL: Для каждой команды выполняется запрос графа, затем создаются дубликаты узлов
+    и специальные рёбра между ними
+
 FRONTEND (index.html)
 --------------------------------------------------------------------------------
 
@@ -244,7 +278,8 @@ FRONTEND (index.html)
    - periods: список периодов
    - teams: список команд
    - selectedPeriod: выбранный период
-   - selectedTeam: выбранная команда
+   - selectedTeam: выбранная команда (для обратной совместимости)
+   - selectedTeams: массив выбранных команд (для множественного выбора)
    - sortOrder: порядок сортировки списка команд ("asc" или "desc")
    - nodes/edges: данные графа
    - teamMembers: Map с ID авторов и их статусами в команде
@@ -263,6 +298,9 @@ FRONTEND (index.html)
    - renderPublications(): отрисовка списка публикаций (с обработчиком клика)
    - showPublicationDetail(docId): загрузка и отображение полной метаинформации о публикации
    - togglePublicationModal(show): показ/скрытие модального окна публикации
+   - toggleTeamSelection(teamId): добавление/удаление команды из множественного выбора
+   - loadMultipleTeamsGraph(): загрузка объединённого графа для нескольких команд
+   - clearTeamGraph(): очистка графа команд
    - applyTeamHighlight(): применение подсветки команды на графе
    - applySettingsValues(): применение настроек симуляции
 

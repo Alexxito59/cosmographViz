@@ -615,7 +615,7 @@
   <div id="publicationModal" class="modal">
     <div class="modal-card wide">
       <div class="row" style="align-items:center; justify-content: space-between; gap: 10px; margin-bottom: 16px;">
-        <h3 style="margin: 0;">Метаинформация о публикации</h3>
+        <h3 style="margin: 0;">Подробная информация о публикации</h3>
         <button id="closePublicationModal" class="floating-btn" type="button" style="padding: 8px 10px; box-shadow: none;">Закрыть</button>
       </div>
       <div id="publicationContent" style="max-height: 70vh; overflow-y: auto;">
@@ -635,7 +635,8 @@
       periods: [],
       teams: [],
       selectedPeriod: null,
-      selectedTeam: null,
+      selectedTeam: null, // для обратной совместимости, но теперь используем selectedTeams
+      selectedTeams: [], // массив выбранных команд
       nodes: [],
       edges: [],
       nodeIndexById: new Map(),
@@ -1006,7 +1007,8 @@
       });
       sortedTeams.forEach((team) => {
         const item = document.createElement("div");
-        item.className = "team-item" + (state.selectedTeam === team.team_id ? " active" : "");
+        const isSelected = state.selectedTeams.includes(team.team_id);
+        item.className = "team-item" + (isSelected ? " active" : "");
         item.innerHTML = `
           <div class="row">
             <div>
@@ -1020,9 +1022,39 @@
           </div>
           <div class="team-sub">Всего авторов: ${team.authors_count}</div>
         `;
-        item.addEventListener("click", () => selectTeam(team.team_id));
+        item.addEventListener("click", (e) => {
+          if (e.ctrlKey || e.metaKey) {
+            // Ctrl+клик или Cmd+клик (Mac) - добавляем/удаляем команду
+            toggleTeamSelection(team.team_id);
+          } else {
+            // Обычный клик - выбираем только эту команду
+            selectTeam(team.team_id);
+          }
+        });
         teamsList.appendChild(item);
       });
+    }
+
+    function toggleTeamSelection(teamId) {
+      const index = state.selectedTeams.indexOf(teamId);
+      if (index === -1) {
+        // Добавляем команду
+        state.selectedTeams.push(teamId);
+      } else {
+        // Удаляем команду
+        state.selectedTeams.splice(index, 1);
+      }
+      renderTeams();
+      if (state.selectedTeams.length === 0) {
+        // Если нет выбранных команд, очищаем граф
+        clearTeamGraph();
+      } else if (state.selectedTeams.length === 1) {
+        // Если одна команда, используем старую логику
+        selectTeam(state.selectedTeams[0]);
+      } else {
+        // Если несколько команд, загружаем объединённый граф
+        loadMultipleTeamsGraph();
+      }
     }
 
     async function loadGraph() {
@@ -1084,6 +1116,92 @@
       
       const totalTime = performance.now() - totalStart;
       console.log(`[PERF] Total graph load time: ${totalTime.toFixed(2)}ms`);
+    }
+
+    async function loadMultipleTeamsGraph() {
+      if (!state.selectedPeriod || state.selectedTeams.length < 2) {
+        return;
+      }
+      try {
+        const totalStart = performance.now();
+        console.log(`[PERF] Loading multiple teams graph: teams=${state.selectedTeams.join(",")}, period=${state.selectedPeriod}`);
+        
+        const qs = new URLSearchParams({
+          team_ids: state.selectedTeams.join(","),
+          period: state.selectedPeriod,
+          max_authors_per_doc: String(state.maxAuthorsPerDoc),
+        });
+        
+        const fetchStart = performance.now();
+        const data = await fetchJson(`/api/teams/multiple/graph?${qs.toString()}`);
+        const fetchTime = performance.now() - fetchStart;
+        console.log(`[PERF] Multiple teams fetch time: ${fetchTime.toFixed(2)}ms, nodes: ${data.nodes?.length || 0}, edges: ${data.edges?.length || 0}`);
+        
+        const processStart = performance.now();
+        state.nodes = (data.nodes || []).map((n, idx) => ({
+          ...n,
+          idx,
+          label: fmtName(n),
+        }));
+        state.nodeIndexById = new Map(state.nodes.map((n) => [String(n.id), n.idx]));
+        state.focusedPointIndex = null;
+        state.envRingsEnabled = false;
+        state.envRingIndices = [];
+        toggleEnvRingsBtn.disabled = true;
+        toggleEnvRingsBtn.textContent = "Окружение";
+        state.coreRingsEnabled = false;
+        state.coreRingIndices = [];
+        toggleCoreRingsBtn.disabled = true;
+        toggleCoreRingsBtn.textContent = "core";
+        state.peripheryRingsEnabled = false;
+        state.peripheryRingIndices = [];
+        togglePeripheryRingsBtn.disabled = true;
+        togglePeripheryRingsBtn.textContent = "periphery";
+        const indexById = new Map(state.nodes.map((n) => [n.id, n.idx]));
+        state.edges = (data.edges || []).map((e) => ({
+          ...e,
+          sourceIndex: indexById.get(e.source) ?? -1,
+          targetIndex: indexById.get(e.target) ?? -1,
+          pair: `${e.source}|${e.target}`,
+          type: e.type || "collaboration", // "collaboration" или "duplicate"
+        }));
+        const processTime = performance.now() - processStart;
+        console.log(`[PERF] Multiple teams data processing: ${processTime.toFixed(2)}ms`);
+        
+        const buildStart = performance.now();
+        await buildGraph({ reloadData: true });
+        const buildTime = performance.now() - buildStart;
+        console.log(`[PERF] Multiple teams graph build: ${buildTime.toFixed(2)}ms`);
+        
+        const totalTime = performance.now() - totalStart;
+        console.log(`[PERF] Total multiple teams graph load time: ${totalTime.toFixed(2)}ms`);
+      } catch (error) {
+        console.error(`[Teams Explorer] Error loading multiple teams graph:`, error);
+        throw error;
+      }
+    }
+
+    function clearTeamGraph() {
+      if (state.graph) {
+        state.graph.destroy().catch((e) => {
+          console.warn("[Teams Explorer] Failed to destroy graph", e);
+        });
+        state.graph = null;
+        state.controls.fit?.remove?.();
+        state.controls.zoom?.remove?.();
+        state.controls = {};
+        document.getElementById("fitControl").innerHTML = "";
+        document.getElementById("zoomControl").innerHTML = "";
+      }
+      state.simulationPaused = false;
+      syncPlayPauseButton();
+      showPlaceholder();
+      teamTitle.textContent = "–";
+      authorsList.innerHTML = "";
+      pubsList.innerHTML = "";
+      state.teamMembers.clear();
+      state.nodes = [];
+      state.edges = [];
     }
 
     async function loadTeamGraph(teamId) {
@@ -1372,10 +1490,46 @@
         linkSourceIndexBy: "sourceIndex",
         linkTargetIndexBy: "targetIndex",
         linkWidthBy: "weight",
-        linkWidthByFn: (value) => edgeWidthLevel(value) * state.edgeWidthScale,
+        linkWidthByFn: (value, link) => {
+          // Для рёбер-дубликатов делаем толще
+          if (link && link.type === "duplicate") {
+            return 8 * state.edgeWidthScale; // Толстое ребро для дубликатов
+          }
+          return edgeWidthLevel(value) * state.edgeWidthScale;
+        },
         linkWidthStrategy: "direct",
         linkColorBy: "pair",
-        linkColorByFn: (pair) => {
+        linkColorByFn: (pair, link) => {
+          // Для рёбер-дубликатов используем специальный цвет
+          if (link && link.type === "duplicate") {
+            // Получаем узлы для определения цветов команд
+            const [source, target] = String(pair).split("|");
+            let sourceNode, targetNode;
+            if (useOptimization && nodeMapById) {
+              sourceNode = nodeMapById.get(source);
+              targetNode = nodeMapById.get(target);
+            } else {
+              sourceNode = state.nodes.find((n) => n.id === source);
+              targetNode = state.nodes.find((n) => n.id === target);
+            }
+            
+            if (sourceNode && targetNode) {
+              // Определяем цвета на основе статусов узлов
+              const sourceColor = sourceNode.status === "core" ? colors.core : 
+                                  sourceNode.status === "periphery" ? colors.periphery : colors.neutral;
+              const targetColor = targetNode.status === "core" ? colors.core : 
+                                 targetNode.status === "periphery" ? colors.periphery : colors.neutral;
+              
+              // Если цвета разные, используем промежуточный (оранжевый), иначе цвет узла
+              if (sourceColor !== targetColor) {
+                return "#ff6b35"; // Оранжевый для связи между разными командами
+              }
+              return sourceColor; // Цвет команды если оба узла из одной команды
+            }
+            return "#ff6b35"; // Оранжевый для дубликатов по умолчанию
+          }
+          
+          // Обычная логика для рёбер соавторства
           if (!pair) return colors.link;
           const [source, target] = String(pair).split("|");
           
@@ -1411,6 +1565,10 @@
           return colors.link;
         },
         curvedLinks: true,
+        curvedLinkByFn: (link) => {
+          // Рёбра-дубликаты делаем прямыми для лучшей видимости
+          return link && link.type !== "duplicate";
+        },
         curvedLinkSegments: 19,
         curvedLinkWeight: 0.4,
         curvedLinkControlPointDistance: 0.45,
@@ -1535,6 +1693,7 @@
 
     async function selectTeam(teamId) {
       state.selectedTeam = teamId;
+      state.selectedTeams = teamId ? [teamId] : [];
       renderTeams();
       if (!teamId) {
         // Если команда не выбрана, уничтожаем граф и показываем заглушку
