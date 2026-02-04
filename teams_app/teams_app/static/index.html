@@ -219,6 +219,13 @@
       animation: envDash 1.6s linear infinite;
       opacity: 0.95;
     }
+    .duplicate-link-line {
+      stroke: #ff6b35;
+      stroke-width: 4;
+      stroke-linecap: round;
+      opacity: 0.8;
+      pointer-events: none;
+    }
     #graphPlaceholder {
       position: absolute;
       top: 0;
@@ -506,6 +513,9 @@
         <g id="peripheryRingsGroup"></g>
         <circle id="focusRingCircle" class="focus-ring-circle" cx="-10" cy="-10" r="0"></circle>
       </svg>
+      <svg id="duplicateLinksOverlay" class="focus-ring-overlay hidden" aria-hidden="true">
+        <g id="duplicateLinksGroup"></g>
+      </svg>
       <div id="linkToast" class="link-toast"></div>
       <div id="graphPlaceholder" class="placeholder">
         <div class="placeholder-icon">📊</div>
@@ -528,6 +538,7 @@
         <button id="toggleCoreRings" class="floating-btn">core</button>
         <button id="togglePeripheryRings" class="floating-btn">periphery</button>
         <button id="toggleEnvRings" class="floating-btn">Окружение</button>
+        <button id="toggleDuplicateLinks" class="floating-btn">Слияние авторов</button>
         <button id="playPause" class="floating-btn">Пауза</button>
       </div>
     </main>
@@ -655,6 +666,8 @@
       peripheryRingsEnabled: false,
       peripheryRingIndices: [],
       sortOrder: "desc", // "asc" или "desc" для сортировки по количеству членов
+      duplicateLinksEnabled: false, // Включено ли отображение линий между дубликатами
+      duplicatePairs: [], // Пары дубликатов для визуализации
       // We control the UI state for play/pause ourselves because Cosmograph's
       // `isSimulationRunning` can be transient/out-of-sync during data reloads.
       simulationPaused: false,
@@ -713,8 +726,12 @@
     const toggleCoreRingsBtn = document.getElementById("toggleCoreRings");
     const togglePeripheryRingsBtn = document.getElementById("togglePeripheryRings");
     const toggleEnvRingsBtn = document.getElementById("toggleEnvRings");
+    const toggleDuplicateLinksBtn = document.getElementById("toggleDuplicateLinks");
+    const duplicateLinksOverlay = document.getElementById("duplicateLinksOverlay");
+    const duplicateLinksGroup = document.getElementById("duplicateLinksGroup");
     const linkToast = document.getElementById("linkToast");
     let focusRingRaf = null;
+    let duplicateLinksRaf = null;
     let fitViewTimer = null;
     let linkToastTimer = null;
     const nodeTeamsState = {
@@ -1163,8 +1180,10 @@
           sourceIndex: indexById.get(e.source) ?? -1,
           targetIndex: indexById.get(e.target) ?? -1,
           pair: `${e.source}|${e.target}`,
-          type: e.type || "collaboration", // "collaboration" или "duplicate"
         }));
+        // Сохраняем пары дубликатов для визуализации
+        state.duplicatePairs = data.duplicate_pairs || [];
+        state.duplicateLinksEnabled = false;
         const processTime = performance.now() - processStart;
         console.log(`[PERF] Multiple teams data processing: ${processTime.toFixed(2)}ms`);
         
@@ -1172,6 +1191,13 @@
         await buildGraph({ reloadData: true });
         const buildTime = performance.now() - buildStart;
         console.log(`[PERF] Multiple teams graph build: ${buildTime.toFixed(2)}ms`);
+        
+        // Обновляем состояние кнопки слияния авторов
+        if (toggleDuplicateLinksBtn) {
+          toggleDuplicateLinksBtn.disabled = state.selectedTeams.length <= 1 || state.duplicatePairs.length === 0;
+        }
+        state.duplicateLinksEnabled = false;
+        updateDuplicateLinks();
         
         const totalTime = performance.now() - totalStart;
         console.log(`[PERF] Total multiple teams graph load time: ${totalTime.toFixed(2)}ms`);
@@ -1182,6 +1208,8 @@
     }
 
     function clearTeamGraph() {
+      state.duplicateLinksEnabled = false;
+      updateDuplicateLinks();
       if (state.graph) {
         state.graph.destroy().catch((e) => {
           console.warn("[Teams Explorer] Failed to destroy graph", e);
@@ -1280,6 +1308,83 @@
       state.focusedPointIndex = state.focusedPointIndex === idx ? null : idx;
       updateFocusRing();
       void buildGraph();
+    }
+
+    function updateDuplicateLinks() {
+      const hasGraph = Boolean(state.graph);
+      const shouldShow = state.duplicateLinksEnabled && hasGraph && Array.isArray(state.duplicatePairs) && state.duplicatePairs.length > 0;
+      
+      duplicateLinksOverlay?.classList.toggle("hidden", !shouldShow);
+      if (!shouldShow) {
+        if (duplicateLinksRaf) cancelAnimationFrame(duplicateLinksRaf);
+        duplicateLinksRaf = null;
+        if (duplicateLinksGroup) duplicateLinksGroup.replaceChildren();
+        return;
+      }
+      
+      // Создаём линии для каждой пары дубликатов
+      const ns = "http://www.w3.org/2000/svg";
+      if (duplicateLinksGroup) {
+        duplicateLinksGroup.replaceChildren();
+        for (const pair of state.duplicatePairs) {
+          const line = document.createElementNS(ns, "line");
+          line.setAttribute("class", "duplicate-link-line");
+          line.setAttribute("data-source", pair.source);
+          line.setAttribute("data-target", pair.target);
+          line.setAttribute("x1", "0");
+          line.setAttribute("y1", "0");
+          line.setAttribute("x2", "0");
+          line.setAttribute("y2", "0");
+          duplicateLinksGroup.appendChild(line);
+        }
+      }
+      
+      const tick = () => {
+        const hasGraphNow = Boolean(state.graph);
+        const shouldShowNow = state.duplicateLinksEnabled && hasGraphNow && Array.isArray(state.duplicatePairs) && state.duplicatePairs.length > 0;
+        
+        if (!shouldShowNow) {
+          duplicateLinksOverlay?.classList.add("hidden");
+          duplicateLinksRaf = null;
+          return;
+        }
+        
+        if (duplicateLinksGroup) {
+          for (const line of duplicateLinksGroup.children) {
+            const sourceId = line.getAttribute("data-source");
+            const targetId = line.getAttribute("data-target");
+            if (!sourceId || !targetId) continue;
+            
+            const sourceNode = state.nodes.find((n) => n.id === sourceId);
+            const targetNode = state.nodes.find((n) => n.id === targetId);
+            if (!sourceNode || !targetNode) continue;
+            
+            const sourceIdx = sourceNode.idx;
+            const targetIdx = targetNode.idx;
+            
+            const sourceSpacePos = state.graph.getPointPositionByIndex(sourceIdx);
+            const targetSpacePos = state.graph.getPointPositionByIndex(targetIdx);
+            
+            if (sourceSpacePos && targetSpacePos) {
+              const sourceScreenPos = state.graph.spaceToScreenPosition(sourceSpacePos);
+              const targetScreenPos = state.graph.spaceToScreenPosition(targetSpacePos);
+              
+              if (sourceScreenPos && targetScreenPos) {
+                const [x1, y1] = sourceScreenPos;
+                const [x2, y2] = targetScreenPos;
+                line.setAttribute("x1", String(x1));
+                line.setAttribute("y1", String(y1));
+                line.setAttribute("x2", String(x2));
+                line.setAttribute("y2", String(y2));
+              }
+            }
+          }
+        }
+        
+        duplicateLinksRaf = requestAnimationFrame(tick);
+      };
+      
+      if (!duplicateLinksRaf) duplicateLinksRaf = requestAnimationFrame(tick);
     }
 
     function updateFocusRing() {
@@ -1490,45 +1595,10 @@
         linkSourceIndexBy: "sourceIndex",
         linkTargetIndexBy: "targetIndex",
         linkWidthBy: "weight",
-        linkWidthByFn: (value, link) => {
-          // Для рёбер-дубликатов делаем толще
-          if (link && link.type === "duplicate") {
-            return 8 * state.edgeWidthScale; // Толстое ребро для дубликатов
-          }
-          return edgeWidthLevel(value) * state.edgeWidthScale;
-        },
+        linkWidthByFn: (value) => edgeWidthLevel(value) * state.edgeWidthScale,
         linkWidthStrategy: "direct",
         linkColorBy: "pair",
-        linkColorByFn: (pair, link) => {
-          // Для рёбер-дубликатов используем специальный цвет
-          if (link && link.type === "duplicate") {
-            // Получаем узлы для определения цветов команд
-            const [source, target] = String(pair).split("|");
-            let sourceNode, targetNode;
-            if (useOptimization && nodeMapById) {
-              sourceNode = nodeMapById.get(source);
-              targetNode = nodeMapById.get(target);
-            } else {
-              sourceNode = state.nodes.find((n) => n.id === source);
-              targetNode = state.nodes.find((n) => n.id === target);
-            }
-            
-            if (sourceNode && targetNode) {
-              // Определяем цвета на основе статусов узлов
-              const sourceColor = sourceNode.status === "core" ? colors.core : 
-                                  sourceNode.status === "periphery" ? colors.periphery : colors.neutral;
-              const targetColor = targetNode.status === "core" ? colors.core : 
-                                 targetNode.status === "periphery" ? colors.periphery : colors.neutral;
-              
-              // Если цвета разные, используем промежуточный (оранжевый), иначе цвет узла
-              if (sourceColor !== targetColor) {
-                return "#ff6b35"; // Оранжевый для связи между разными командами
-              }
-              return sourceColor; // Цвет команды если оба узла из одной команды
-            }
-            return "#ff6b35"; // Оранжевый для дубликатов по умолчанию
-          }
-          
+        linkColorByFn: (pair) => {
           // Обычная логика для рёбер соавторства
           if (!pair) return colors.link;
           const [source, target] = String(pair).split("|");
@@ -1565,10 +1635,6 @@
           return colors.link;
         },
         curvedLinks: true,
-        curvedLinkByFn: (link) => {
-          // Рёбра-дубликаты делаем прямыми для лучшей видимости
-          return link && link.type !== "duplicate";
-        },
         curvedLinkSegments: 19,
         curvedLinkWeight: 0.4,
         curvedLinkControlPointDistance: 0.45,
@@ -1929,6 +1995,14 @@
       togglePeripheryRingsBtn.textContent = state.peripheryRingsEnabled ? "periphery: выкл" : "periphery";
       updateFocusRing();
     });
+    
+    if (toggleDuplicateLinksBtn) {
+      toggleDuplicateLinksBtn.addEventListener("click", () => {
+        state.duplicateLinksEnabled = !state.duplicateLinksEnabled;
+        toggleDuplicateLinksBtn.textContent = state.duplicateLinksEnabled ? "Скрыть слияние" : "Слияние авторов";
+        updateDuplicateLinks();
+      });
+    }
 
     (async function init() {
       await loadPeriods();
@@ -1936,6 +2010,10 @@
       settingInputs.includeSinglePub.checked = state.includeSinglePub;
       showPlaceholder();
       syncPlayPauseButton();
+      // Инициализация кнопки слияния авторов
+      if (toggleDuplicateLinksBtn) {
+        toggleDuplicateLinksBtn.disabled = true;
+      }
     })();
   </script>
 </body>

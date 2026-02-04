@@ -691,36 +691,33 @@ async def get_multiple_teams_graph(
                         "type": "collaboration",  # обычное ребро соавторства
                     })
         
-        # Создаём специальные рёбра-связи между дубликатами одного автора
-        duplicate_edges = []
+        # Информация о дубликатах для визуализации (без создания рёбер в симуляции)
+        duplicate_pairs = []
         for author_id, team_list in author_to_teams.items():
             if len(team_list) > 1:
-                # Автор есть в нескольких командах - соединяем все его дубликаты
+                # Автор есть в нескольких командах - сохраняем пары дубликатов для визуализации
                 node_ids = [f"{author_id}_team_{tid}" for tid in team_list]
-                # Создаём рёбра между всеми парами дубликатов
+                # Создаём пары между всеми дубликатами
                 for i in range(len(node_ids)):
                     for j in range(i + 1, len(node_ids)):
-                        duplicate_edges.append({
+                        duplicate_pairs.append({
                             "source": node_ids[i],
                             "target": node_ids[j],
-                            "weight": 1,  # фиксированный вес для видимости
-                            "type": "duplicate",  # специальный тип для рёбер-дубликатов
+                            "author_id": author_id,
                         })
-        
-        # Объединяем все рёбра
-        all_edges.extend(duplicate_edges)
         
         # Преобразуем узлы в список
         nodes_list = list(all_nodes.values())
         
         total_time = time.perf_counter() - total_start
-        logger.info(f"[PERF] Total multiple teams graph load time: {total_time:.3f}s (nodes: {len(nodes_list)}, edges: {len(all_edges)}, duplicate_edges: {len(duplicate_edges)})")
+        logger.info(f"[PERF] Total multiple teams graph load time: {total_time:.3f}s (nodes: {len(nodes_list)}, edges: {len(all_edges)}, duplicate_pairs: {len(duplicate_pairs)})")
         
         response_data = {
             "nodes": nodes_list,
             "edges": all_edges,
             "teams": team_id_list,
             "author_duplicates": {auth_id: teams for auth_id, teams in author_to_teams.items() if len(teams) > 1},
+            "duplicate_pairs": duplicate_pairs,  # Пары дубликатов для визуализации
         }
         return JSONResponse(response_data)
         
