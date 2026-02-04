@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +49,26 @@ def parse_period(period: str) -> tuple[int, int]:
     if start > end:
         raise HTTPException(status_code=400, detail="Invalid period: start year > end year")
     return start, end
+
+
+def json_serialize_value(value: Any) -> Any:
+    """
+    Преобразует значение в JSON-совместимый формат.
+    Обрабатывает date, datetime и другие специальные типы.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, (int, float, str, bool)):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    # Для других типов пробуем преобразовать в строку
+    try:
+        return str(value)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 @app.get("/", response_class=FileResponse)
@@ -428,6 +449,68 @@ async def get_team_detail(
     response = {
         "authors": authors,
         "publications": sorted(publications.values(), key=lambda p: (p["year"] or 0, p["doc_id"]), reverse=True),
+    }
+    return JSONResponse(response)
+
+
+@app.get("/api/publications/{doc_id}")
+async def get_publication_detail(
+    doc_id: str,
+) -> JSONResponse:
+    """
+    Получить полную метаинформацию о публикации по её ID.
+    Возвращает все доступные поля из таблицы docs.
+    """
+    sql = """
+        SELECT *
+        FROM docs
+        WHERE eid = ?
+    """
+    with connect() as con:
+        result = con.execute(sql, [doc_id])
+        # Получаем названия колонок из описания курсора
+        column_names = [desc[0] for desc in result.description] if result.description else []
+        rows = result.fetchall()
+    
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Publication with id {doc_id} not found")
+    
+    # Создаём словарь из данных
+    row = rows[0]
+    publication_data = {}
+    for i, col_name in enumerate(column_names):
+        value = row[i]
+        # Преобразуем значение в JSON-совместимый формат
+        publication_data[col_name] = json_serialize_value(value)
+    
+    # Также получаем список авторов публикации
+    authors_sql = """
+        SELECT 
+            a.id,
+            a.lastname,
+            a.givenname,
+            ad.auth_seqn
+        FROM auth_doc ad
+        JOIN authors a ON a.id = ad.auth_id
+        WHERE ad.doc_id = ?
+        ORDER BY ad.auth_seqn
+    """
+    with connect() as con:
+        author_rows = con.execute(authors_sql, [doc_id]).fetchall()
+    
+    authors = [
+        {
+            "id": int(row[0]),
+            "lastname": row[1] or "",
+            "givenname": row[2] or "",
+            "seq": row[3] if row[3] is not None else None,
+        }
+        for row in author_rows
+    ]
+    
+    response = {
+        "publication": publication_data,
+        "authors": authors,
     }
     return JSONResponse(response)
 

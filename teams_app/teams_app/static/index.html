@@ -339,6 +339,33 @@
     .modal .control { margin-bottom: 10px; }
     .small { font-size: 12px; color: var(--muted); }
     .empty { color: var(--muted); text-align: center; margin-top: 16px; }
+    .pub-row { cursor: pointer; }
+    .pub-row:hover { border-color: var(--accent); }
+    .publication-info {
+      display: grid;
+      gap: 16px;
+    }
+    .publication-info .field {
+      display: grid;
+      gap: 4px;
+    }
+    .publication-info .field-label {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .publication-info .field-value {
+      font-size: 14px;
+      color: var(--text);
+      word-break: break-word;
+      line-height: 1.5;
+    }
+    .publication-info .field-value.empty {
+      color: var(--muted);
+      font-style: italic;
+    }
     .node-info {
       display: grid;
       gap: 8px;
@@ -585,6 +612,18 @@
     </div>
   </div>
 
+  <div id="publicationModal" class="modal">
+    <div class="modal-card wide">
+      <div class="row" style="align-items:center; justify-content: space-between; gap: 10px; margin-bottom: 16px;">
+        <h3 style="margin: 0;">Метаинформация о публикации</h3>
+        <button id="closePublicationModal" class="floating-btn" type="button" style="padding: 8px 10px; box-shadow: none;">Закрыть</button>
+      </div>
+      <div id="publicationContent" style="max-height: 70vh; overflow-y: auto;">
+        <div class="small" style="text-align: center; padding: 20px;">Загрузка...</div>
+      </div>
+    </div>
+  </div>
+
   <script type="module">
     import {
       Cosmograph,
@@ -659,6 +698,9 @@
     const hideNodeInfoBtn = document.getElementById("hideNodeInfoBtn");
     const nodeTeamsBtn = document.getElementById("nodeTeamsBtn");
     const nodeTeams = document.getElementById("nodeTeams");
+    const publicationModal = document.getElementById("publicationModal");
+    const publicationContent = document.getElementById("publicationContent");
+    const closePublicationModal = document.getElementById("closePublicationModal");
     const graphPlaceholder = document.getElementById("graphPlaceholder");
     const toolbar = document.querySelector(".toolbar");
     const graphControls = document.querySelector(".graph-controls");
@@ -836,6 +878,90 @@
       const res = await fetch(url);
       if (!res.ok) throw new Error(`API error ${res.status}`);
       return res.json();
+    }
+
+    function formatFieldValue(value) {
+      if (value === null || value === undefined || value === "") {
+        return null;
+      }
+      if (typeof value === "boolean") {
+        return value ? "Да" : "Нет";
+      }
+      if (typeof value === "number") {
+        return String(value);
+      }
+      return String(value);
+    }
+
+    function formatFieldLabel(key) {
+      // Преобразуем snake_case и camelCase в читаемый формат
+      return key
+        .replace(/_/g, " ")
+        .replace(/([A-Z])/g, " $1")
+        .replace(/^./, (str) => str.toUpperCase())
+        .trim();
+    }
+
+    async function showPublicationDetail(docId) {
+      if (!docId) return;
+      
+      publicationModal.classList.add("active");
+      publicationContent.innerHTML = '<div class="small" style="text-align: center; padding: 20px;">Загрузка...</div>';
+      
+      try {
+        const data = await fetchJson(`/api/publications/${encodeURIComponent(String(docId))}`);
+        const pub = data.publication || {};
+        const authors = data.authors || [];
+        
+        // Сортируем поля: сначала важные (title, year, eid), затем остальные
+        const importantFields = ["eid", "title", "year"];
+        const otherFields = Object.keys(pub).filter(k => !importantFields.includes(k));
+        const sortedFields = [...importantFields, ...otherFields];
+        
+        let html = '<div class="publication-info">';
+        
+        // Отображаем поля публикации
+        for (const key of sortedFields) {
+          if (!(key in pub)) continue;
+          const value = formatFieldValue(pub[key]);
+          if (value === null) continue;
+          
+          html += `
+            <div class="field">
+              <div class="field-label">${formatFieldLabel(key)}</div>
+              <div class="field-value">${value}</div>
+            </div>
+          `;
+        }
+        
+        // Отображаем список авторов
+        if (authors.length > 0) {
+          html += `
+            <div class="field">
+              <div class="field-label">Авторы (${authors.length})</div>
+              <div class="field-value">
+                ${authors.map((a, idx) => {
+                  const name = fmtName(a);
+                  const seq = a.seq !== null && a.seq !== undefined ? ` [${a.seq}]` : "";
+                  return `${idx + 1}. ${name}${seq}`;
+                }).join("<br>")}
+              </div>
+            </div>
+          `;
+        }
+        
+        html += '</div>';
+        publicationContent.innerHTML = html;
+      } catch (error) {
+        publicationContent.innerHTML = `<div class="small" style="text-align: center; padding: 20px; color: #d32f2f;">Ошибка загрузки: ${error.message}</div>`;
+      }
+    }
+
+    function togglePublicationModal(show) {
+      publicationModal.classList.toggle("active", show);
+      if (!show) {
+        publicationContent.innerHTML = "";
+      }
     }
 
     async function loadPeriods() {
@@ -1483,6 +1609,7 @@
           <div class="pub-title">${p.title || "Без названия"}</div>
           <div class="small">${p.year || "—"}</div>
         `;
+        item.addEventListener("click", () => showPublicationDetail(p.doc_id));
         pubsList.appendChild(item);
       });
     }
@@ -1620,6 +1747,11 @@
     });
 
     hideNodeInfoBtn.addEventListener("click", () => toggleNodeInfo(false));
+
+    closePublicationModal.addEventListener("click", () => togglePublicationModal(false));
+    publicationModal.addEventListener("click", (e) => {
+      if (e.target === publicationModal) togglePublicationModal(false);
+    });
 
     toggleEnvRingsBtn.addEventListener("click", () => {
       state.envRingsEnabled = !state.envRingsEnabled;
