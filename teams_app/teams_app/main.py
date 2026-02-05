@@ -528,8 +528,7 @@ async def get_multiple_teams_graph(
 ) -> JSONResponse:
     """
     Получить объединённый граф для нескольких команд.
-    Для авторов, которые есть в нескольких командах, создаются отдельные узлы
-    с ID вида {author_id}_team_{team_id}, и они соединяются специальными рёбрами.
+    Узлы авторов объединяются - если автор есть в нескольких командах, создаётся один узел (без дубликатов).
     """
     try:
         total_start = time.perf_counter()
@@ -653,68 +652,69 @@ async def get_multiple_teams_graph(
                     edges_sql, [period, team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
                 ).fetchall()
             
-            # Создаём узлы для этой команды (с уникальными ID)
+            # Объединяем узлы - если автор уже есть, не создаём дубликат
             for row in node_rows:
                 auth_id = str(row[0])
-                node_id = f"{auth_id}_team_{team_id}"
                 
                 # Отслеживаем, в каких командах автор
                 if auth_id not in author_to_teams:
                     author_to_teams[auth_id] = []
-                author_to_teams[auth_id].append(team_id)
+                if team_id not in author_to_teams[auth_id]:
+                    author_to_teams[auth_id].append(team_id)
                 
-                all_nodes[node_id] = {
-                    "id": node_id,
-                    "author_id": auth_id,  # оригинальный ID автора
-                    "team_id": team_id,
-                    "lastname": row[1] or "",
-                    "givenname": row[2] or "",
-                    "pubs": int(row[3]),
-                    "status": row[4] or None,
-                }
+                # Если узел уже есть, обновляем его данные
+                if auth_id in all_nodes:
+                    existing = all_nodes[auth_id]
+                    # Обновляем статус: core > periphery > None
+                    if row[4] == "core" or (row[4] == "periphery" and existing["status"] != "core"):
+                        existing["status"] = row[4]
+                    # Обновляем публикации (берём максимум)
+                    existing["pubs"] = max(existing["pubs"], int(row[3]))
+                    # Обновляем список команд
+                    existing["team_ids"] = author_to_teams[auth_id]
+                else:
+                    # Создаём новый узел (используем auth_id как ID, без дубликатов)
+                    all_nodes[auth_id] = {
+                        "id": auth_id,  # Используем author_id как ID узла (без дубликатов)
+                        "lastname": row[1] or "",
+                        "givenname": row[2] or "",
+                        "pubs": int(row[3]),
+                        "status": row[4] or None,
+                        "team_ids": author_to_teams[auth_id],  # Список команд, в которых состоит автор
+                    }
             
-            # Создаём рёбра для этой команды (с уникальными ID узлов)
+            # Создаём рёбра соавторства (объединяем, избегая дубликатов)
             for row in edge_rows:
                 source_auth = str(row[0])
                 target_auth = str(row[1])
                 weight = int(row[2])
                 
-                source_id = f"{source_auth}_team_{team_id}"
-                target_id = f"{target_auth}_team_{team_id}"
-                
                 # Проверяем, что оба узла существуют
-                if source_id in all_nodes and target_id in all_nodes:
-                    all_edges.append({
-                        "source": source_id,
-                        "target": target_id,
-                        "weight": weight,
-                        "type": "collaboration",  # обычное ребро соавторства
-                    })
-        
-        # Создаём специальные рёбра-связи между дубликатами одного автора
-        duplicate_edges = []
-        for author_id, team_list in author_to_teams.items():
-            if len(team_list) > 1:
-                # Автор есть в нескольких командах - соединяем все его дубликаты
-                node_ids = [f"{author_id}_team_{tid}" for tid in team_list]
-                # Создаём рёбра между всеми парами дубликатов
-                for i in range(len(node_ids)):
-                    for j in range(i + 1, len(node_ids)):
-                        duplicate_edges.append({
-                            "source": node_ids[i],
-                            "target": node_ids[j],
-                            "weight": 1,  # фиксированный вес для видимости
-                            "type": "duplicate",  # специальный тип для рёбер-дубликатов
+                if source_auth in all_nodes and target_auth in all_nodes:
+                    # Ищем существующее ребро
+                    existing_edge = None
+                    for e in all_edges:
+                        if (e["source"] == source_auth and e["target"] == target_auth) or \
+                           (e["source"] == target_auth and e["target"] == source_auth):
+                            existing_edge = e
+                            break
+                    
+                    if existing_edge:
+                        # Обновляем вес (берём максимум)
+                        existing_edge["weight"] = max(existing_edge["weight"], weight)
+                    else:
+                        # Создаём новое ребро
+                        all_edges.append({
+                            "source": source_auth,
+                            "target": target_auth,
+                            "weight": weight,
                         })
-        
-        # Объединяем все рёбра
-        all_edges.extend(duplicate_edges)
         
         # Преобразуем узлы в список
         nodes_list = list(all_nodes.values())
         
         total_time = time.perf_counter() - total_start
-        logger.info(f"[PERF] Total multiple teams graph load time: {total_time:.3f}s (nodes: {len(nodes_list)}, edges: {len(all_edges)}, duplicate_edges: {len(duplicate_edges)})")
+        logger.info(f"[PERF] Total multiple teams graph load time: {total_time:.3f}s (nodes: {len(nodes_list)}, edges: {len(all_edges)})")
         
         response_data = {
             "nodes": nodes_list,
