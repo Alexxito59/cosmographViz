@@ -735,6 +735,7 @@
       includeSinglePub: false,
       focusedPointIndex: null,
       highlightedTeamId: null, // ID подсвеченной команды (для toggle)
+      highlightedTeamMembers: new Map(), // Map: author_id -> status в выделенной команде
       envRingsEnabled: false,
       envRingIndices: [],
       coreRingsEnabled: false,
@@ -1244,6 +1245,7 @@
         state.focusedPointIndex = null;
         // Сбрасываем выделение команды при загрузке нескольких команд
         state.highlightedTeamId = null;
+        state.highlightedTeamMembers.clear();
         
         state.envRingsEnabled = false;
         state.envRingIndices = [];
@@ -1404,8 +1406,11 @@
           // Если команда была выделена, снимаем выделение
           if (state.highlightedTeamId === teamData.team_id) {
             state.highlightedTeamId = null;
+            state.highlightedTeamMembers.clear();
             // Скрываем индикатор выделенной команды
             if (highlightedTeamIndicator) highlightedTeamIndicator.classList.add("hidden");
+            // Пересчитываем цвета узлов и ребер (возвращаем к исходным)
+            void buildGraph();
             if (state.graph && typeof state.graph.unselectAllPoints === "function") {
               try {
                 state.graph.unselectAllPoints();
@@ -1451,9 +1456,14 @@
           // Toggle: если команда уже подсвечена, снимаем подсветку
           if (state.highlightedTeamId === teamData.team_id) {
             state.highlightedTeamId = null;
+            state.highlightedTeamMembers.clear();
             unhighlightTeamNodes(teamData.team_id);
             // Скрываем индикатор выделенной команды
             if (highlightedTeamIndicator) highlightedTeamIndicator.classList.add("hidden");
+            // Пересчитываем цвета узлов и ребер (возвращаем к исходным)
+            void buildGraph();
+            // Пересчитываем цвета узлов и ребер (возвращаем к исходным)
+            void buildGraph();
             // Сбрасываем состояния кнопок при снятии выделения
             state.envRingsEnabled = false;
             state.coreRingsEnabled = false;
@@ -1475,12 +1485,21 @@
               unhighlightTeamNodes(state.highlightedTeamId);
             }
             state.highlightedTeamId = teamData.team_id;
+            // Сохраняем информацию о членах выделенной команды (author_id -> status)
+            state.highlightedTeamMembers.clear();
+            if (teamData.authors && teamData.authors.length > 0) {
+              teamData.authors.forEach((a) => {
+                state.highlightedTeamMembers.set(String(a.id), a.status || null);
+              });
+            }
             highlightTeamNodes(teamData.team_id);
             // Показываем индикатор выделенной команды
             if (highlightedTeamIndicator && highlightedTeamNumber) {
               highlightedTeamNumber.textContent = teamData.team_id;
               highlightedTeamIndicator.classList.remove("hidden");
             }
+            // Пересчитываем цвета узлов и ребер для выделенной команды
+            void buildGraph();
             // Сбрасываем состояния кнопок при переключении команды
             state.envRingsEnabled = false;
             state.coreRingsEnabled = false;
@@ -1583,6 +1602,7 @@
         state.focusedPointIndex = null;
         // Сбрасываем выделение команды при переключении на одну команду
         state.highlightedTeamId = null;
+        state.highlightedTeamMembers.clear();
         
         // В режиме одной команды показываем обычные кнопки
         toggleEnvRingsBtn.style.display = "block";
@@ -1957,24 +1977,27 @@
         const nodeMapTime = performance.now() - nodeMapStart;
         console.log(`[PERF] Node map creation: ${nodeMapTime.toFixed(2)}ms`);
         
-        // Предвычисляем цвета узлов для кэширования
+        // Предвычисляем цвета узлов для кэширования (только если команда не выделена)
         const nodeColorCacheStart = performance.now();
         nodeColorCache = new Map();
-        for (const node of state.nodes) {
-          const id = String(node.id);
-          let color = colors.neutral;
-          if (node.status) {
-            color = node.status === "core" ? colors.core : colors.periphery;
-          } else if (node.status === null) {
-            // Явно окружение (status = null)
-            color = colors.environment;
-          } else {
-            // Проверяем teamMembers для полного графа
-            const status = state.teamMembers.get(id);
-            if (status === "core") color = colors.core;
-            else if (status === "periphery") color = colors.periphery;
+        if (!state.highlightedTeamId) {
+          // Кэшируем только если команда не выделена
+          for (const node of state.nodes) {
+            const id = String(node.id);
+            let color = colors.neutral;
+            if (node.status) {
+              color = node.status === "core" ? colors.core : colors.periphery;
+            } else if (node.status === null) {
+              // Явно окружение (status = null)
+              color = colors.environment;
+            } else {
+              // Проверяем teamMembers для полного графа
+              const status = state.teamMembers.get(id);
+              if (status === "core") color = colors.core;
+              else if (status === "periphery") color = colors.periphery;
+            }
+            nodeColorCache.set(id, color);
           }
-          nodeColorCache.set(id, color);
         }
         const nodeColorCacheTime = performance.now() - nodeColorCacheStart;
         console.log(`[PERF] Node color cache: ${nodeColorCacheTime.toFixed(2)}ms`);
@@ -1990,12 +2013,29 @@
         pointSizeRange: sizeRange,
         pointColorBy: "id",
         pointColorByFn: (id) => {
+          const authorId = String(id);
+          
+          // Если команда выделена, используем статус автора в этой команде
+          if (state.highlightedTeamId) {
+            if (state.highlightedTeamMembers.has(authorId)) {
+              const status = state.highlightedTeamMembers.get(authorId);
+              if (status === "core") return colors.core;
+              if (status === "periphery") return colors.periphery;
+              // Если статус null или undefined, значит автор не в команде (окружение)
+              return colors.environment;
+            } else {
+              // Автор не в выделенной команде - это окружение, оранжевый цвет
+              return colors.environment;
+            }
+          }
+          
+          // Иначе используем стандартную логику
           if (useOptimization && nodeColorCache) {
             // Используем кэш для больших графов
-            return nodeColorCache.get(String(id)) || colors.neutral;
+            return nodeColorCache.get(authorId) || colors.neutral;
           }
           // Для маленьких графов - простая проверка без кэша
-          const node = state.nodes.find((n) => n.id === String(id));
+          const node = state.nodes.find((n) => n.id === authorId);
           if (!node) return colors.neutral;
           if (node.status) {
             return node.status === "core" ? colors.core : colors.periphery;
@@ -2003,7 +2043,7 @@
           if (node.status === null) {
             return colors.environment;
           }
-          const status = state.teamMembers.get(String(id));
+          const status = state.teamMembers.get(authorId);
           if (status === "core") return colors.core;
           if (status === "periphery") return colors.periphery;
           return colors.neutral;
@@ -2024,10 +2064,29 @@
         linkWidthStrategy: "direct",
         linkColorBy: "pair",
         linkColorByFn: (pair, link) => {
-          // Для рёбер-дубликатов используем специальный цвет
+          if (!pair) return colors.link;
+          const [source, target] = String(pair).split("|");
+          
+          // Если команда выделена, используем статусы авторов в этой команде
+          if (state.highlightedTeamId && state.highlightedTeamMembers.size > 0) {
+            const sourceInTeam = state.highlightedTeamMembers.has(source);
+            const targetInTeam = state.highlightedTeamMembers.has(target);
+            
+            // Если оба автора в выделенной команде - зелёный
+            if (sourceInTeam && targetInTeam) {
+              return colors.core;
+            }
+            // Если один в команде, другой в окружении - оранжевый
+            if ((sourceInTeam && !targetInTeam) || (!sourceInTeam && targetInTeam)) {
+              return colors.environment;
+            }
+            // Если оба в окружении - серый
+            return colors.link;
+          }
+          
+          // Иначе используем стандартную логику
           if (link && link.type === "duplicate") {
             // Получаем узлы для определения цветов команд
-            const [source, target] = String(pair).split("|");
             let sourceNode, targetNode;
             if (useOptimization && nodeMapById) {
               sourceNode = nodeMapById.get(source);
@@ -2054,9 +2113,6 @@
           }
           
           // Обычная логика для рёбер соавторства
-          if (!pair) return colors.link;
-          const [source, target] = String(pair).split("|");
-          
           let sourceNode, targetNode;
           if (useOptimization && nodeMapById) {
             // Используем Map для больших графов
@@ -2163,6 +2219,7 @@
             // Если клик был на пустом месте (не на узле/ребре), снимаем выделение команды
             if (!window.wasPointOrLinkClick && state.highlightedTeamId) {
               state.highlightedTeamId = null;
+              state.highlightedTeamMembers.clear();
               // Скрываем индикатор выделенной команды
               if (highlightedTeamIndicator) highlightedTeamIndicator.classList.add("hidden");
               // Снимаем выделение со всех точек
@@ -2180,6 +2237,8 @@
               if (toggleEnvRingsBtn) toggleEnvRingsBtn.textContent = "Окружение";
               if (toggleCoreRingsBtn) toggleCoreRingsBtn.textContent = "core";
               if (togglePeripheryRingsBtn) togglePeripheryRingsBtn.textContent = "periphery";
+              // Пересчитываем цвета узлов и ребер (возвращаем к исходным)
+              void buildGraph();
             }
             // Сбрасываем флаг для следующего клика
             window.wasPointOrLinkClick = false;
