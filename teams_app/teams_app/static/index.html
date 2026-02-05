@@ -661,6 +661,7 @@
       maxAuthorsPerDoc: 100,
       includeSinglePub: false,
       focusedPointIndex: null,
+      highlightedTeamId: null, // ID подсвеченной команды (для toggle)
       envRingsEnabled: false,
       envRingIndices: [],
       coreRingsEnabled: false,
@@ -1278,9 +1279,16 @@
             <div class="name">Команда #${teamData.team_id}</div>
           </div>
         `;
-        // По клику пока ничего не происходит
+        // По клику подсвечиваем команду через Cosmograph selection
         teamItem.addEventListener("click", () => {
-          // Пока пусто
+          // Toggle: если команда уже подсвечена, снимаем подсветку
+          if (state.highlightedTeamId === teamData.team_id) {
+            state.highlightedTeamId = null;
+            unhighlightTeamNodes(teamData.team_id);
+          } else {
+            state.highlightedTeamId = teamData.team_id;
+            highlightTeamNodes(teamData.team_id);
+          }
         });
         authorsList.appendChild(teamItem);
         
@@ -1412,6 +1420,86 @@
       state.focusedPointIndex = state.focusedPointIndex === idx ? null : idx;
       updateFocusRing();
       void buildGraph();
+    }
+    
+    function highlightTeamNodes(teamId) {
+      if (!state.graph || !state.nodes.length) {
+        return;
+      }
+      
+      // Находим индексы всех узлов команды
+      const teamNodeIndices = [];
+      const teamIdNum = Number(teamId);
+      
+      for (const node of state.nodes) {
+        if (node.team_ids && Array.isArray(node.team_ids)) {
+          const belongsToTeam = node.team_ids.some(tid => 
+            Number(tid) === teamIdNum || String(tid) === String(teamId)
+          );
+          if (belongsToTeam && typeof node.idx === "number") {
+            teamNodeIndices.push(node.idx);
+          }
+        }
+      }
+      
+      if (teamNodeIndices.length === 0) {
+        console.warn(`[Teams Explorer] No nodes found for team ${teamId}`);
+        return;
+      }
+      
+      console.log(`[Teams Explorer] Highlighting team ${teamId}: ${teamNodeIndices.length} nodes`);
+      
+      // Выделяем узлы команды через Cosmograph API (заменяем текущее выделение)
+      if (state.graph && typeof state.graph.selectPoints === "function") {
+        try {
+          state.graph.selectPoints(teamNodeIndices, false); // false = replace selection
+        } catch (e) {
+          console.warn("[Teams Explorer] Failed to select points:", e);
+        }
+      } else {
+        console.warn("[Teams Explorer] selectPoints method not available");
+      }
+    }
+    
+    function unhighlightTeamNodes(teamId) {
+      if (!state.graph) {
+        return;
+      }
+      
+      // Находим индексы всех узлов команды для удаления из выделения
+      const teamNodeIndices = [];
+      const teamIdNum = Number(teamId);
+      
+      for (const node of state.nodes) {
+        if (node.team_ids && Array.isArray(node.team_ids)) {
+          const belongsToTeam = node.team_ids.some(tid => 
+            Number(tid) === teamIdNum || String(tid) === String(teamId)
+          );
+          if (belongsToTeam && typeof node.idx === "number") {
+            teamNodeIndices.push(node.idx);
+          }
+        }
+      }
+      
+      if (teamNodeIndices.length === 0) {
+        return;
+      }
+      
+      // Удаляем только узлы этой команды из выделения
+      if (state.graph && typeof state.graph.unselectPointsByIndicies === "function") {
+        try {
+          state.graph.unselectPointsByIndicies(teamNodeIndices);
+        } catch (e) {
+          console.warn("[Teams Explorer] Failed to unselect points:", e);
+        }
+      } else if (state.graph && typeof state.graph.unselectAllPoints === "function") {
+        // Fallback: если метод недоступен, снимаем всё выделение
+        try {
+          state.graph.unselectAllPoints();
+        } catch (e) {
+          console.warn("[Teams Explorer] Failed to unselect all points:", e);
+        }
+      }
     }
 
     function updateFocusRing() {
