@@ -538,9 +538,14 @@
       <div class="graph-controls hidden">
         <div id="fitControl"></div>
         <div id="zoomControl"></div>
+        <!-- Кнопки для режима одной команды -->
         <button id="toggleCoreRings" class="floating-btn">core</button>
         <button id="togglePeripheryRings" class="floating-btn">periphery</button>
         <button id="toggleEnvRings" class="floating-btn">Окружение</button>
+        <!-- Кнопки для режима нескольких команд (отладка) -->
+        <button id="toggleCoreRingsMulti" class="floating-btn" style="background: #ff6b35; display: none;">core [M]</button>
+        <button id="togglePeripheryRingsMulti" class="floating-btn" style="background: #ff6b35; display: none;">periphery [M]</button>
+        <button id="toggleEnvRingsMulti" class="floating-btn" style="background: #ff6b35; display: none;">Окружение [M]</button>
         <button id="playPause" class="floating-btn">Пауза</button>
       </div>
     </main>
@@ -727,6 +732,10 @@
     const toggleCoreRingsBtn = document.getElementById("toggleCoreRings");
     const togglePeripheryRingsBtn = document.getElementById("togglePeripheryRings");
     const toggleEnvRingsBtn = document.getElementById("toggleEnvRings");
+    // Кнопки для режима нескольких команд (отладка)
+    const toggleCoreRingsMultiBtn = document.getElementById("toggleCoreRingsMulti");
+    const togglePeripheryRingsMultiBtn = document.getElementById("togglePeripheryRingsMulti");
+    const toggleEnvRingsMultiBtn = document.getElementById("toggleEnvRingsMulti");
     const linkToast = document.getElementById("linkToast");
     let focusRingRaf = null;
     let fitViewTimer = null;
@@ -1160,18 +1169,26 @@
         }));
         state.nodeIndexById = new Map(state.nodes.map((n) => [String(n.id), n.idx]));
         state.focusedPointIndex = null;
+        // Сбрасываем выделение команды при загрузке нескольких команд
+        state.highlightedTeamId = null;
+        
         state.envRingsEnabled = false;
         state.envRingIndices = [];
-        toggleEnvRingsBtn.disabled = true;
-        toggleEnvRingsBtn.textContent = "Окружение";
+        // В режиме нескольких команд показываем специальные кнопки
+        if (toggleEnvRingsBtn) toggleEnvRingsBtn.style.display = "none";
+        if (toggleCoreRingsBtn) toggleCoreRingsBtn.style.display = "none";
+        if (togglePeripheryRingsBtn) togglePeripheryRingsBtn.style.display = "none";
+        if (toggleEnvRingsMultiBtn) toggleEnvRingsMultiBtn.style.display = "block";
+        if (toggleCoreRingsMultiBtn) toggleCoreRingsMultiBtn.style.display = "block";
+        if (togglePeripheryRingsMultiBtn) togglePeripheryRingsMultiBtn.style.display = "block";
+        if (toggleEnvRingsMultiBtn) toggleEnvRingsMultiBtn.textContent = "Окружение [M]";
+        if (toggleCoreRingsMultiBtn) toggleCoreRingsMultiBtn.textContent = "core [M]";
+        if (togglePeripheryRingsMultiBtn) togglePeripheryRingsMultiBtn.textContent = "periphery [M]";
+        
         state.coreRingsEnabled = false;
         state.coreRingIndices = [];
-        toggleCoreRingsBtn.disabled = true;
-        toggleCoreRingsBtn.textContent = "core";
         state.peripheryRingsEnabled = false;
         state.peripheryRingIndices = [];
-        togglePeripheryRingsBtn.disabled = true;
-        togglePeripheryRingsBtn.textContent = "periphery";
         const indexById = new Map(state.nodes.map((n) => [n.id, n.idx]));
         state.edges = (data.edges || []).map((e) => ({
           ...e,
@@ -1281,13 +1298,42 @@
         `;
         // По клику подсвечиваем команду через Cosmograph selection
         teamItem.addEventListener("click", () => {
+          // Показываем сообщение о выделении команды
+          showTeamToast(`Выделена команда ${teamData.team_id}`);
+          
           // Toggle: если команда уже подсвечена, снимаем подсветку
           if (state.highlightedTeamId === teamData.team_id) {
             state.highlightedTeamId = null;
             unhighlightTeamNodes(teamData.team_id);
+            // Сбрасываем состояния кнопок при снятии выделения
+            state.envRingsEnabled = false;
+            state.coreRingsEnabled = false;
+            state.peripheryRingsEnabled = false;
+            toggleEnvRingsBtn.textContent = "Окружение";
+            toggleCoreRingsBtn.textContent = "core";
+            togglePeripheryRingsBtn.textContent = "periphery";
+            // Снимаем выделение со всех точек
+            if (state.graph && typeof state.graph.unselectAllPoints === "function") {
+              try {
+                state.graph.unselectAllPoints();
+              } catch (e) {
+                console.warn("[Teams Explorer] Failed to unselect all points:", e);
+              }
+            }
           } else {
+            // Если была выделена другая команда, снимаем её выделение
+            if (state.highlightedTeamId) {
+              unhighlightTeamNodes(state.highlightedTeamId);
+            }
             state.highlightedTeamId = teamData.team_id;
             highlightTeamNodes(teamData.team_id);
+            // Сбрасываем состояния кнопок при переключении команды
+            state.envRingsEnabled = false;
+            state.coreRingsEnabled = false;
+            state.peripheryRingsEnabled = false;
+            toggleEnvRingsBtn.textContent = "Окружение";
+            toggleCoreRingsBtn.textContent = "core";
+            togglePeripheryRingsBtn.textContent = "periphery";
           }
         });
         authorsList.appendChild(teamItem);
@@ -1378,6 +1424,17 @@
         }));
         state.nodeIndexById = new Map(state.nodes.map((n) => [String(n.id), n.idx]));
         state.focusedPointIndex = null;
+        // Сбрасываем выделение команды при переключении на одну команду
+        state.highlightedTeamId = null;
+        
+        // В режиме одной команды показываем обычные кнопки
+        toggleEnvRingsBtn.style.display = "block";
+        toggleCoreRingsBtn.style.display = "block";
+        togglePeripheryRingsBtn.style.display = "block";
+        toggleEnvRingsMultiBtn.style.display = "none";
+        toggleCoreRingsMultiBtn.style.display = "none";
+        togglePeripheryRingsMultiBtn.style.display = "none";
+        
         state.envRingIndices = state.nodes.filter((n) => !n.status).map((n) => n.idx);
         toggleEnvRingsBtn.disabled = state.envRingIndices.length === 0;
         toggleEnvRingsBtn.textContent = "Окружение";
@@ -1501,6 +1558,36 @@
         }
       }
     }
+    
+    function getTeamRoleIndices(teamId, role) {
+      // Возвращает индексы узлов указанной роли для указанной команды
+      // role может быть: "core", "periphery", или null (для окружения)
+      const indices = [];
+      const teamIdNum = Number(teamId);
+      
+      for (const node of state.nodes) {
+        if (node.team_ids && Array.isArray(node.team_ids)) {
+          const belongsToTeam = node.team_ids.some(tid => 
+            Number(tid) === teamIdNum || String(tid) === String(teamId)
+          );
+          
+          if (belongsToTeam && typeof node.idx === "number") {
+            // Проверяем роль узла
+            if (role === null) {
+              // Окружение: узел без статуса или статус null
+              if (!node.status || node.status === null) {
+                indices.push(node.idx);
+              }
+            } else if (node.status === role) {
+              // Узел с нужной ролью (core или periphery)
+              indices.push(node.idx);
+            }
+          }
+        }
+      }
+      
+      return indices;
+    }
 
     function updateFocusRing() {
       const hasGraph = Boolean(state.graph);
@@ -1598,6 +1685,24 @@
       if (!focusRingRaf) focusRingRaf = requestAnimationFrame(tick);
     }
 
+    function showTeamToast(text) {
+      if (!linkToast) return;
+      linkToast.textContent = text;
+      linkToast.classList.add("active");
+      // Позиционируем по центру экрана
+      linkToast.style.left = "50%";
+      linkToast.style.top = "50%";
+      linkToast.style.transform = "translate(-50%, -50%)";
+      linkToast.style.position = "fixed";
+      linkToast.style.zIndex = "10000";
+      
+      if (linkToastTimer) window.clearTimeout(linkToastTimer);
+      linkToastTimer = window.setTimeout(() => {
+        linkToast.classList.remove("active");
+        linkToastTimer = null;
+      }, 1000); // Показываем 1 секунду
+    }
+    
     function showLinkToastAt(text, x, y) {
       if (!linkToast) return;
       linkToast.textContent = text;
@@ -2133,21 +2238,238 @@
     });
 
     toggleEnvRingsBtn.addEventListener("click", () => {
-      state.envRingsEnabled = !state.envRingsEnabled;
-      toggleEnvRingsBtn.textContent = state.envRingsEnabled ? "Окружение: выкл" : "Окружение";
-      updateFocusRing();
+      // Проверяем режим: несколько команд или одна команда
+      const isMultipleTeamsMode = state.selectedTeams.length > 1;
+      
+      if (isMultipleTeamsMode) {
+        // Режим нескольких команд: работаем только для выделенной команды
+        if (!state.highlightedTeamId) {
+          showTeamToast("Сначала выделите команду");
+          return;
+        }
+        
+        state.envRingsEnabled = !state.envRingsEnabled;
+        toggleEnvRingsBtn.textContent = state.envRingsEnabled ? "Окружение ✓" : "Окружение";
+        
+        // Обновляем индексы для отрисовки колец
+        state.envRingIndices = getTeamRoleIndices(state.highlightedTeamId, null); // null = окружение
+        
+        // Вызываем updateFocusRing для отрисовки колец
+        updateFocusRing();
+        
+        // Также используем Cosmograph selection для визуального выделения
+        if (state.envRingsEnabled && state.envRingIndices.length > 0 && state.graph && typeof state.graph.selectPoints === "function") {
+          try {
+            state.graph.selectPoints(state.envRingIndices, true); // true = add to selection
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to select env points:", e);
+          }
+        } else if (!state.envRingsEnabled && state.envRingIndices.length > 0 && state.graph && typeof state.graph.unselectPointsByIndicies === "function") {
+          try {
+            state.graph.unselectPointsByIndicies(state.envRingIndices);
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to unselect env points:", e);
+          }
+        }
+      } else {
+        // Режим одной команды: стандартное поведение
+        state.envRingsEnabled = !state.envRingsEnabled;
+        toggleEnvRingsBtn.textContent = state.envRingsEnabled ? "Окружение: выкл" : "Окружение";
+        updateFocusRing();
+      }
     });
 
     toggleCoreRingsBtn.addEventListener("click", () => {
-      state.coreRingsEnabled = !state.coreRingsEnabled;
-      toggleCoreRingsBtn.textContent = state.coreRingsEnabled ? "core: выкл" : "core";
-      updateFocusRing();
+      // Проверяем режим: несколько команд или одна команда
+      const isMultipleTeamsMode = state.selectedTeams.length > 1;
+      
+      if (isMultipleTeamsMode) {
+        // Режим нескольких команд: работаем только для выделенной команды
+        if (!state.highlightedTeamId) {
+          showTeamToast("Сначала выделите команду");
+          return;
+        }
+        
+        state.coreRingsEnabled = !state.coreRingsEnabled;
+        toggleCoreRingsBtn.textContent = state.coreRingsEnabled ? "core ✓" : "core";
+        
+        // Обновляем индексы для отрисовки колец
+        state.coreRingIndices = getTeamRoleIndices(state.highlightedTeamId, "core");
+        
+        // Вызываем updateFocusRing для отрисовки колец
+        updateFocusRing();
+        
+        // Также используем Cosmograph selection для визуального выделения
+        if (state.coreRingsEnabled && state.coreRingIndices.length > 0 && state.graph && typeof state.graph.selectPoints === "function") {
+          try {
+            state.graph.selectPoints(state.coreRingIndices, true); // true = add to selection
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to select core points:", e);
+          }
+        } else if (!state.coreRingsEnabled && state.coreRingIndices.length > 0 && state.graph && typeof state.graph.unselectPointsByIndicies === "function") {
+          try {
+            state.graph.unselectPointsByIndicies(state.coreRingIndices);
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to unselect core points:", e);
+          }
+        }
+      } else {
+        // Режим одной команды: стандартное поведение
+        state.coreRingsEnabled = !state.coreRingsEnabled;
+        toggleCoreRingsBtn.textContent = state.coreRingsEnabled ? "core: выкл" : "core";
+        updateFocusRing();
+      }
     });
 
+    // Обработчики для кнопок режима нескольких команд (отладка)
+    if (toggleEnvRingsMultiBtn) {
+      toggleEnvRingsMultiBtn.addEventListener("click", () => {
+        if (!state.highlightedTeamId) {
+          showTeamToast("Сначала выделите команду");
+          return;
+        }
+        
+        state.envRingsEnabled = !state.envRingsEnabled;
+        toggleEnvRingsMultiBtn.textContent = state.envRingsEnabled ? "Окружение [M] ✓" : "Окружение [M]";
+        
+        // Обновляем индексы для отрисовки колец
+        state.envRingIndices = getTeamRoleIndices(state.highlightedTeamId, null); // null = окружение
+        
+        console.log("[DEBUG] Env indices for team", state.highlightedTeamId, ":", state.envRingIndices);
+        
+        // Вызываем updateFocusRing для отрисовки колец
+        updateFocusRing();
+        
+        // Также используем Cosmograph selection для визуального выделения
+        if (state.envRingsEnabled && state.envRingIndices.length > 0 && state.graph && typeof state.graph.selectPoints === "function") {
+          try {
+            state.graph.selectPoints(state.envRingIndices, true);
+            console.log("[DEBUG] Selected", state.envRingIndices.length, "env points");
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to select env points:", e);
+          }
+        } else if (!state.envRingsEnabled && state.envRingIndices.length > 0 && state.graph && typeof state.graph.unselectPointsByIndicies === "function") {
+          try {
+            state.graph.unselectPointsByIndicies(state.envRingIndices);
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to unselect env points:", e);
+          }
+        }
+      });
+    }
+
+    if (toggleCoreRingsMultiBtn) {
+      toggleCoreRingsMultiBtn.addEventListener("click", () => {
+        if (!state.highlightedTeamId) {
+          showTeamToast("Сначала выделите команду");
+          return;
+        }
+        
+        state.coreRingsEnabled = !state.coreRingsEnabled;
+        toggleCoreRingsMultiBtn.textContent = state.coreRingsEnabled ? "core [M] ✓" : "core [M]";
+        
+        // Обновляем индексы для отрисовки колец
+        state.coreRingIndices = getTeamRoleIndices(state.highlightedTeamId, "core");
+        
+        console.log("[DEBUG] Core indices for team", state.highlightedTeamId, ":", state.coreRingIndices);
+        
+        // Вызываем updateFocusRing для отрисовки колец
+        updateFocusRing();
+        
+        // Также используем Cosmograph selection для визуального выделения
+        if (state.coreRingsEnabled && state.coreRingIndices.length > 0 && state.graph && typeof state.graph.selectPoints === "function") {
+          try {
+            state.graph.selectPoints(state.coreRingIndices, true);
+            console.log("[DEBUG] Selected", state.coreRingIndices.length, "core points");
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to select core points:", e);
+          }
+        } else if (!state.coreRingsEnabled && state.coreRingIndices.length > 0 && state.graph && typeof state.graph.unselectPointsByIndicies === "function") {
+          try {
+            state.graph.unselectPointsByIndicies(state.coreRingIndices);
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to unselect core points:", e);
+          }
+        }
+      });
+    }
+
+    if (togglePeripheryRingsMultiBtn) {
+      togglePeripheryRingsMultiBtn.addEventListener("click", () => {
+        if (!state.highlightedTeamId) {
+          showTeamToast("Сначала выделите команду");
+          return;
+        }
+        
+        state.peripheryRingsEnabled = !state.peripheryRingsEnabled;
+        togglePeripheryRingsMultiBtn.textContent = state.peripheryRingsEnabled ? "periphery [M] ✓" : "periphery [M]";
+        
+        // Обновляем индексы для отрисовки колец
+        state.peripheryRingIndices = getTeamRoleIndices(state.highlightedTeamId, "periphery");
+        
+        console.log("[DEBUG] Periphery indices for team", state.highlightedTeamId, ":", state.peripheryRingIndices);
+        
+        // Вызываем updateFocusRing для отрисовки колец
+        updateFocusRing();
+        
+        // Также используем Cosmograph selection для визуального выделения
+        if (state.peripheryRingsEnabled && state.peripheryRingIndices.length > 0 && state.graph && typeof state.graph.selectPoints === "function") {
+          try {
+            state.graph.selectPoints(state.peripheryRingIndices, true);
+            console.log("[DEBUG] Selected", state.peripheryRingIndices.length, "periphery points");
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to select periphery points:", e);
+          }
+        } else if (!state.peripheryRingsEnabled && state.peripheryRingIndices.length > 0 && state.graph && typeof state.graph.unselectPointsByIndicies === "function") {
+          try {
+            state.graph.unselectPointsByIndicies(state.peripheryRingIndices);
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to unselect periphery points:", e);
+          }
+        }
+      });
+    }
+
     togglePeripheryRingsBtn.addEventListener("click", () => {
-      state.peripheryRingsEnabled = !state.peripheryRingsEnabled;
-      togglePeripheryRingsBtn.textContent = state.peripheryRingsEnabled ? "periphery: выкл" : "periphery";
-      updateFocusRing();
+      // Проверяем режим: несколько команд или одна команда
+      const isMultipleTeamsMode = state.selectedTeams.length > 1;
+      
+      if (isMultipleTeamsMode) {
+        // Режим нескольких команд: работаем только для выделенной команды
+        if (!state.highlightedTeamId) {
+          showTeamToast("Сначала выделите команду");
+          return;
+        }
+        
+        state.peripheryRingsEnabled = !state.peripheryRingsEnabled;
+        togglePeripheryRingsBtn.textContent = state.peripheryRingsEnabled ? "periphery ✓" : "periphery";
+        
+        // Обновляем индексы для отрисовки колец
+        state.peripheryRingIndices = getTeamRoleIndices(state.highlightedTeamId, "periphery");
+        
+        // Вызываем updateFocusRing для отрисовки колец
+        updateFocusRing();
+        
+        // Также используем Cosmograph selection для визуального выделения
+        if (state.peripheryRingsEnabled && state.peripheryRingIndices.length > 0 && state.graph && typeof state.graph.selectPoints === "function") {
+          try {
+            state.graph.selectPoints(state.peripheryRingIndices, true); // true = add to selection
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to select periphery points:", e);
+          }
+        } else if (!state.peripheryRingsEnabled && state.peripheryRingIndices.length > 0 && state.graph && typeof state.graph.unselectPointsByIndicies === "function") {
+          try {
+            state.graph.unselectPointsByIndicies(state.peripheryRingIndices);
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to unselect periphery points:", e);
+          }
+        }
+      } else {
+        // Режим одной команды: стандартное поведение
+        state.peripheryRingsEnabled = !state.peripheryRingsEnabled;
+        togglePeripheryRingsBtn.textContent = state.peripheryRingsEnabled ? "periphery: выкл" : "periphery";
+        updateFocusRing();
+      }
     });
 
     (async function init() {
