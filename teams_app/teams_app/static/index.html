@@ -138,6 +138,19 @@
       justify-content: space-between;
       gap: 8px;
     }
+    .author-row.team-header {
+      background: rgba(15, 106, 235, 0.08);
+      border-left: 3px solid var(--accent);
+      font-weight: 600;
+      cursor: default;
+    }
+    .author-row.team-header:hover {
+      background: rgba(15, 106, 235, 0.12);
+    }
+    .author-row.in-all-teams {
+      border: 2px solid #000;
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+    }
     .author-row, .pub-row {
       padding: 10px;
       border-radius: 10px;
@@ -1050,6 +1063,7 @@
         clearTeamGraph();
       } else if (state.selectedTeams.length === 1) {
         // Если одна команда, используем старую логику
+        state.selectedTeam = state.selectedTeams[0];
         selectTeam(state.selectedTeams[0]);
       } else {
         // Если несколько команд, загружаем объединённый граф
@@ -1168,6 +1182,9 @@
         const processTime = performance.now() - processStart;
         console.log(`[PERF] Multiple teams data processing: ${processTime.toFixed(2)}ms`);
         
+        // Загружаем информацию о командах для правой панели
+        await loadSelectedTeamsInfo();
+        
         const buildStart = performance.now();
         await buildGraph({ reloadData: true });
         const buildTime = performance.now() - buildStart;
@@ -1179,6 +1196,121 @@
         console.error(`[Teams Explorer] Error loading multiple teams graph:`, error);
         throw error;
       }
+    }
+
+    async function loadSelectedTeamsInfo() {
+      // Загружаем информацию о выбранных командах для правой панели
+      if (!state.selectedPeriod || state.selectedTeams.length === 0) {
+        return;
+      }
+      try {
+        const teamsData = [];
+        for (const teamId of state.selectedTeams) {
+          const qs = new URLSearchParams({ period: state.selectedPeriod });
+          const data = await fetchJson(`/api/teams/${teamId}?${qs.toString()}`);
+          console.log(`[Teams Explorer] Loaded team ${teamId} data:`, data);
+          // API возвращает {authors: [...], publications: [...]}, без поля team
+          if (data && data.authors) {
+            teamsData.push({
+              team_id: teamId,
+              authors: data.authors || [],
+            });
+          } else {
+            console.warn(`[Teams Explorer] Team ${teamId} data missing authors:`, data);
+          }
+        }
+        // Обновляем правую панель - показываем команды и их членов
+        renderSelectedTeams(teamsData);
+      } catch (error) {
+        console.error(`[Teams Explorer] Error loading teams info:`, error);
+      }
+    }
+
+    function renderSelectedTeams(teamsData) {
+      // Отображаем список команд и их членов в правой панели
+      authorsList.innerHTML = "";
+      
+      console.log(`[Teams Explorer] Rendering ${teamsData.length} teams:`, teamsData);
+      
+      if (teamsData.length === 0) {
+        authorsList.innerHTML = '<div class="empty">Нет команд</div>';
+        return;
+      }
+      
+      // Обновляем заголовок с номерами команд
+      if (state.selectedTeams.length > 1) {
+        teamTitle.textContent = `Команды: ${state.selectedTeams.join(", ")}`;
+      } else {
+        teamTitle.textContent = `Команда #${state.selectedTeams[0]}`;
+      }
+      
+      // Находим авторов, которые есть во всех выбранных командах
+      const authorsInAllTeams = new Set();
+      if (teamsData.length > 1) {
+        // Начинаем с авторов первой команды
+        const firstTeamAuthorIds = new Set((teamsData[0].authors || []).map(a => String(a.id)));
+        
+        // Проверяем, какие из них есть во всех остальных командах
+        for (const authorId of firstTeamAuthorIds) {
+          let inAllTeams = true;
+          for (let i = 1; i < teamsData.length; i++) {
+            const teamAuthorIds = new Set((teamsData[i].authors || []).map(a => String(a.id)));
+            if (!teamAuthorIds.has(authorId)) {
+              inAllTeams = false;
+              break;
+            }
+          }
+          if (inAllTeams) {
+            authorsInAllTeams.add(authorId);
+          }
+        }
+      }
+      
+      console.log(`[Teams Explorer] Authors in all teams:`, Array.from(authorsInAllTeams));
+      
+      // Для каждой команды: окошко с номером команды + список её членов
+      teamsData.forEach((teamData) => {
+        // Окошко с номером команды
+        const teamItem = document.createElement("div");
+        teamItem.className = "author-row team-header";
+        teamItem.innerHTML = `
+          <div class="row">
+            <div class="name">Команда #${teamData.team_id}</div>
+          </div>
+        `;
+        // По клику пока ничего не происходит
+        teamItem.addEventListener("click", () => {
+          // Пока пусто
+        });
+        authorsList.appendChild(teamItem);
+        
+        // Список членов команды
+        if (teamData.authors && teamData.authors.length > 0) {
+          teamData.authors.forEach((a) => {
+            const authorId = String(a.id);
+            const isInAllTeams = authorsInAllTeams.has(authorId);
+            
+            const item = document.createElement("div");
+            item.className = "author-row" + (isInAllTeams ? " in-all-teams" : "");
+            item.innerHTML = `
+              <div class="row">
+                <div class="name"><span class="dot ${a.status}"></span> ${fmtName(a)}</div>
+                <div class="status">${a.status}</div>
+              </div>
+            `;
+            item.addEventListener("click", () => focusPointByAuthorId(a.id));
+            authorsList.appendChild(item);
+          });
+        }
+      });
+      
+      // Обновляем teamMembers для подсветки
+      state.teamMembers = new Map();
+      teamsData.forEach((teamData) => {
+        (teamData.authors || []).forEach((a) => {
+          state.teamMembers.set(String(a.id), a.status || "core");
+        });
+      });
     }
 
     function clearTeamGraph() {
