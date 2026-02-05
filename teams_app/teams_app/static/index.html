@@ -556,15 +556,14 @@
           <button id="clearSearchBtn" style="background:#e9e9ee; color:#1f1f26; box-shadow:none;">Сброс</button>
         </div>
       </div>
-      <div class="control">
-        <label for="sortSelect">Сортировка списка команд</label>
-        <select id="sortSelect" style="font-size: 12px;">
-          <option value="desc">↓ По убыванию</option>
-          <option value="asc">↑ По вместо</option>
-        </select>
-      </div>
       <div class="split">
-        <h2>Список команд</h2>
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+          <h2 style="margin: 0;">Список команд</h2>
+          <select id="sortSelect" style="font-size: 12px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff;">
+            <option value="desc">↓ По убыванию размера</option>
+            <option value="asc">↑ По возрастанию размера</option>
+          </select>
+        </div>
         <div id="teamsList" class="list"></div>
       </div>
     </aside>
@@ -1314,6 +1313,8 @@
         }
         // Обновляем правую панель - показываем команды и их членов
         renderSelectedTeams(teamsData);
+        // Обновляем панель публикаций - показываем команды
+        renderPublications(teamsData.map(t => ({ team_id: t.team_id })));
       } catch (error) {
         console.error(`[Teams Explorer] Error loading teams info:`, error);
       }
@@ -2351,7 +2352,8 @@
       teamTitle.textContent = `Команда #${teamId}`;
       const data = await fetchJson(`/api/teams/${teamId}?period=${state.selectedPeriod}`);
       renderAuthors(data.authors || []);
-      renderPublications(data.publications || []);
+      // Рендерим список команд с публикациями
+      renderPublications([{ team_id: teamId }]);
       state.teamMembers = new Map();
       (data.authors || []).forEach((a) => state.teamMembers.set(String(a.id), a.status || "core"));
       // Загружаем граф команды вместо подсветки полного графа
@@ -2378,24 +2380,118 @@
       });
     }
 
-    function renderPublications(pubs) {
+    async function renderPublications(teamsData) {
+      // teamsData может быть массивом команд или массивом публикаций (для обратной совместимости)
       pubsList.innerHTML = "";
-      if (!pubs.length) {
-        pubsList.innerHTML = '<div class="empty">Нет публикаций</div>';
+      
+      // Если передан массив публикаций (старый формат), конвертируем в формат команд
+      if (teamsData && teamsData.length > 0 && teamsData[0].doc_id) {
+        // Это старый формат - массив публикаций
+        if (!teamsData.length) {
+          pubsList.innerHTML = '<div class="empty">Нет публикаций</div>';
+          return;
+        }
+        teamsData.forEach((p) => {
+          const item = document.createElement("div");
+          item.className = "pub-row";
+          const authors = (p.authors || []).map((a) => `<span class="chip ${a.status}">${fmtName(a)}</span>`).join(" ");
+          item.innerHTML = `
+            <div class="pub-authors">${authors}</div>
+            <div class="pub-title">${p.title || "Без названия"}</div>
+            <div class="small">${p.year || "—"}</div>
+          `;
+          item.addEventListener("click", () => showPublicationDetail(p.doc_id));
+          pubsList.appendChild(item);
+        });
         return;
       }
-      pubs.forEach((p) => {
-        const item = document.createElement("div");
-        item.className = "pub-row";
-        const authors = (p.authors || []).map((a) => `<span class="chip ${a.status}">${fmtName(a)}</span>`).join(" ");
-        item.innerHTML = `
-          <div class="pub-authors">${authors}</div>
-          <div class="pub-title">${p.title || "Без названия"}</div>
-          <div class="small">${p.year || "—"}</div>
+      
+      // Новый формат - массив команд
+      if (!teamsData || teamsData.length === 0) {
+        pubsList.innerHTML = '<div class="empty">Нет команд</div>';
+        return;
+      }
+      
+      // Для каждой команды: окошко с номером команды (с кнопкой развернуть) + список её публикаций
+      for (const teamData of teamsData) {
+        const teamId = teamData.team_id;
+        
+        // Контейнер для публикаций команды
+        const publicationsContainer = document.createElement("div");
+        publicationsContainer.className = "team-members-container";
+        
+        // Окошко с номером команды и кнопкой развернуть
+        const teamItem = document.createElement("div");
+        teamItem.className = "author-row team-header";
+        teamItem.innerHTML = `
+          <div class="row" style="justify-content: space-between; align-items: center;">
+            <div class="name" style="display: flex; align-items: center;">
+              <span class="toggle-icon">▼</span>
+              <span>Команда #${teamId}</span>
+            </div>
+          </div>
         `;
-        item.addEventListener("click", () => showPublicationDetail(p.doc_id));
-        pubsList.appendChild(item);
-      });
+        
+        const toggleIconEl = teamItem.querySelector(".toggle-icon");
+        toggleIconEl.style.marginRight = "8px";
+        toggleIconEl.style.cursor = "pointer";
+        toggleIconEl.style.userSelect = "none";
+        
+        // Обработчик клика на иконку развернуть/свернуть
+        toggleIconEl.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const isExpanded = publicationsContainer.classList.contains("expanded");
+          
+          if (isExpanded) {
+            // Сворачиваем
+            publicationsContainer.classList.remove("expanded");
+            toggleIconEl.textContent = "▼";
+          } else {
+            // Разворачиваем - всегда загружаем публикации из API
+            publicationsContainer.innerHTML = '<div class="small" style="padding: 10px; text-align: center; color: var(--muted);">Загрузка...</div>';
+            
+            // Загружаем из API
+            let publications;
+            try {
+              const qs = new URLSearchParams({ period: state.selectedPeriod });
+              const data = await fetchJson(`/api/teams/${teamId}?${qs.toString()}`);
+              publications = data.publications || [];
+            } catch (error) {
+              console.error(`[Teams Explorer] Error loading publications for team ${teamId}:`, error);
+              publicationsContainer.innerHTML = '<div class="small" style="padding: 10px; text-align: center; color: #dc3545;">Ошибка загрузки</div>';
+              publicationsContainer.classList.add("expanded");
+              toggleIconEl.textContent = "▲";
+              return;
+            }
+            
+            // Очищаем контейнер и рендерим публикации
+            publicationsContainer.innerHTML = "";
+            
+            if (!publications || publications.length === 0) {
+              publicationsContainer.innerHTML = '<div class="empty">Нет публикаций</div>';
+            } else {
+              publications.forEach((p) => {
+                const item = document.createElement("div");
+                item.className = "pub-row";
+                const authors = (p.authors || []).map((a) => `<span class="chip ${a.status}">${fmtName(a)}</span>`).join(" ");
+                item.innerHTML = `
+                  <div class="pub-authors">${authors}</div>
+                  <div class="pub-title">${p.title || "Без названия"}</div>
+                  <div class="small">${p.year || "—"}</div>
+                `;
+                item.addEventListener("click", () => showPublicationDetail(p.doc_id));
+                publicationsContainer.appendChild(item);
+              });
+            }
+            
+            publicationsContainer.classList.add("expanded");
+            toggleIconEl.textContent = "▲";
+          }
+        });
+        
+        pubsList.appendChild(teamItem);
+        pubsList.appendChild(publicationsContainer);
+      }
     }
 
     function updateScales() {
@@ -2630,7 +2726,7 @@
         }
         
         state.envRingsEnabled = !state.envRingsEnabled;
-        toggleEnvRingsMultiBtn.textContent = state.envRingsEnabled ? "Окружение [M] ✓" : "Окружение [M]";
+        toggleEnvRingsMultiBtn.textContent = state.envRingsEnabled ? "Окружение ✓" : "Окружение";
         
         // Обновляем индексы для отрисовки колец
         state.envRingIndices = getTeamRoleIndices(state.highlightedTeamId, null); // null = окружение
