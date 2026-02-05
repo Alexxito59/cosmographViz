@@ -557,6 +557,13 @@
           <h1 id="teamTitle">–</h1>
         </div>
       </div>
+      <div class="control" style="margin-bottom: 12px;">
+        <label for="authorSearchInGraph">Поиск автора на графе</label>
+        <div class="control-row">
+          <input id="authorSearchInGraph" type="text" placeholder="Фамилия или имя" style="flex: 1;" />
+          <button id="searchAuthorBtn" style="background: var(--accent); color: #fff; padding: 10px 12px; border: none; border-radius: 10px; cursor: pointer;">Найти</button>
+        </div>
+      </div>
       <div class="split">
         <h2>Авторы</h2>
         <div id="authorsList" class="list"></div>
@@ -736,6 +743,9 @@
     const toggleCoreRingsMultiBtn = document.getElementById("toggleCoreRingsMulti");
     const togglePeripheryRingsMultiBtn = document.getElementById("togglePeripheryRingsMulti");
     const toggleEnvRingsMultiBtn = document.getElementById("toggleEnvRingsMulti");
+    const authorSearchInGraph = document.getElementById("authorSearchInGraph");
+    const searchAuthorBtn = document.getElementById("searchAuthorBtn");
+    const authorSearchResults = document.getElementById("authorSearchResults");
     const linkToast = document.getElementById("linkToast");
     let focusRingRaf = null;
     let fitViewTimer = null;
@@ -1472,11 +1482,53 @@
 
     function focusPointByAuthorId(authorId) {
       const idx = state.nodeIndexById.get(String(authorId));
-      if (typeof idx !== "number") return;
+      if (typeof idx !== "number") {
+        // Автор не найден в текущем графе
+        showTeamToast("Автор не найден в текущем графе");
+        return;
+      }
       // Toggle: clicking the same author again removes focus/boost
       state.focusedPointIndex = state.focusedPointIndex === idx ? null : idx;
       updateFocusRing();
       void buildGraph();
+    }
+    
+    async function searchAuthorInGraph(query) {
+      if (!query || !query.trim()) {
+        return;
+      }
+      
+      if (!state.selectedPeriod) {
+        showTeamToast("Сначала выберите период");
+        return;
+      }
+      
+      try {
+        const qs = new URLSearchParams({
+          query: query.trim(),
+          period: state.selectedPeriod,
+        });
+        const data = await fetchJson(`/api/authors/search?${qs.toString()}`);
+        
+        if (!data.authors || data.authors.length === 0) {
+          showTeamToast("Авторы не найдены");
+          return;
+        }
+        
+        // Берем первого автора из результатов
+        const author = data.authors[0];
+        const authorId = String(author.id);
+        
+        // Проверяем, есть ли автор в текущем графе
+        if (state.nodeIndexById.has(authorId)) {
+          focusPointByAuthorId(author.id);
+        } else {
+          showTeamToast("Автор не найден в текущем графе");
+        }
+      } catch (error) {
+        console.error("[Teams Explorer] Error searching authors:", error);
+        showTeamToast("Ошибка при поиске авторов");
+      }
     }
     
     function highlightTeamNodes(teamId) {
@@ -2471,6 +2523,24 @@
         updateFocusRing();
       }
     });
+
+    // Обработчики для поиска авторов
+    if (searchAuthorBtn) {
+      searchAuthorBtn.addEventListener("click", () => {
+        const query = authorSearchInGraph?.value || "";
+        searchAuthorInGraph(query);
+      });
+    }
+    
+    if (authorSearchInGraph) {
+      authorSearchInGraph.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+          const query = authorSearchInGraph.value || "";
+          searchAuthorInGraph(query);
+        }
+      });
+      
+    }
 
     (async function init() {
       await loadPeriods();

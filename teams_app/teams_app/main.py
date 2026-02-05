@@ -803,6 +803,85 @@ async def get_author_teams(
     return JSONResponse({"author_id": str(author_id), "period": period, "teams": teams})
 
 
+@app.get("/api/authors/search")
+async def search_authors(
+    query: str = Query(..., description="Search query (author name)"),
+    period: str | None = Query(None, description="Optional period filter"),
+) -> JSONResponse:
+    """
+    Search for authors by name in the current graph nodes.
+    Returns authors that match the query and are present in the graph.
+    """
+    try:
+        query_lower = query.lower().strip()
+        if not query_lower:
+            return JSONResponse({"authors": []})
+        
+        # Если указан период, ищем только в узлах графа этого периода
+        # Иначе ищем во всех авторах
+        if period:
+            start_year, end_year = parse_period(period)
+            # Получаем авторов из графа (те, кто есть в публикациях периода)
+            sql = """
+            WITH period_docs AS (
+                SELECT DISTINCT eid
+                FROM docs
+                WHERE year BETWEEN ? AND ?
+            ),
+            graph_authors AS (
+                SELECT DISTINCT ad.auth_id
+                FROM period_docs d
+                JOIN auth_doc ad ON ad.doc_id = d.eid
+            )
+            SELECT DISTINCT
+                a.id,
+                a.lastname,
+                a.givenname
+            FROM graph_authors ga
+            JOIN authors a ON a.id = ga.auth_id
+            WHERE 
+                LOWER(a.lastname || ' ' || COALESCE(a.givenname, '')) LIKE ?
+                OR LOWER(COALESCE(a.givenname, '') || ' ' || a.lastname) LIKE ?
+            ORDER BY a.lastname, a.givenname
+            LIMIT 50
+            """
+            search_pattern = f"%{query_lower}%"
+            params = [start_year, end_year, search_pattern, search_pattern]
+        else:
+            # Поиск по всем авторам
+            sql = """
+            SELECT DISTINCT
+                a.id,
+                a.lastname,
+                a.givenname
+            FROM authors a
+            WHERE 
+                LOWER(a.lastname || ' ' || COALESCE(a.givenname, '')) LIKE ?
+                OR LOWER(COALESCE(a.givenname, '') || ' ' || a.lastname) LIKE ?
+            ORDER BY a.lastname, a.givenname
+            LIMIT 50
+            """
+            search_pattern = f"%{query_lower}%"
+            params = [search_pattern, search_pattern]
+        
+        with connect() as con:
+            rows = con.execute(sql, params).fetchall()
+        
+        authors = [
+            {
+                "id": str(row[0]),
+                "lastname": row[1] or "",
+                "givenname": row[2] or "",
+            }
+            for row in rows
+        ]
+        
+        return JSONResponse({"authors": authors})
+    except Exception as e:
+        logger.error(f"Error searching authors: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to search authors: {str(e)}")
+
+
 @app.get("/api/teams/{team_id}/graph")
 async def get_team_graph(
     team_id: int,
