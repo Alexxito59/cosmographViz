@@ -147,6 +147,45 @@
     .author-row.team-header:hover {
       background: rgba(15, 106, 235, 0.12);
     }
+    .author-row.toggle-expand {
+      background: rgba(15, 106, 235, 0.05);
+      border-left: 3px solid var(--accent);
+      font-weight: 500;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--accent);
+    }
+    .author-row.toggle-expand:hover {
+      background: rgba(15, 106, 235, 0.1);
+    }
+    .team-members-container {
+      display: none;
+    }
+    .team-members-container.expanded {
+      display: block;
+    }
+    .team-delete-btn {
+      width: 24px;
+      height: 24px;
+      background: #dc3545;
+      border: none;
+      border-radius: 4px;
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      padding: 0;
+      flex-shrink: 0;
+      transition: background-color 0.15s ease;
+    }
+    .team-delete-btn:hover {
+      background: #c82333;
+    }
+    .team-delete-btn:active {
+      background: #bd2130;
+    }
     .author-row.in-all-teams {
       border: 2px solid #000;
       box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
@@ -474,6 +513,25 @@
       line-height: 1.5;
     }
     .toolbar.hidden, .graph-controls.hidden { display: none; }
+    .highlighted-team-indicator {
+      position: absolute;
+      top: 70px;
+      left: 12px;
+      background: rgba(255, 255, 255, 0.95);
+      color: var(--text);
+      padding: 10px 18px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      z-index: 15;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .highlighted-team-indicator.hidden {
+      display: none !important;
+    }
   </style>
 </head>
 <body>
@@ -535,6 +593,9 @@
           <input type="range" id="edgeWidth" min="0.2" max="1.5" step="0.05" value="1.2" />
         </div>
       </div>
+      <div id="highlightedTeamIndicator" class="highlighted-team-indicator hidden">
+        <span>Выделена команда #<span id="highlightedTeamNumber">-</span></span>
+      </div>
       <div class="graph-controls hidden">
         <div id="fitControl"></div>
         <div id="zoomControl"></div>
@@ -543,9 +604,9 @@
         <button id="togglePeripheryRings" class="floating-btn">periphery</button>
         <button id="toggleEnvRings" class="floating-btn">Окружение</button>
         <!-- Кнопки для режима нескольких команд (отладка) -->
-        <button id="toggleCoreRingsMulti" class="floating-btn" style="background: #ff6b35; display: none;">core [M]</button>
-        <button id="togglePeripheryRingsMulti" class="floating-btn" style="background: #ff6b35; display: none;">periphery [M]</button>
-        <button id="toggleEnvRingsMulti" class="floating-btn" style="background: #ff6b35; display: none;">Окружение [M]</button>
+        <button id="toggleCoreRingsMulti" class="floating-btn" style="display: none;">core</button>
+        <button id="togglePeripheryRingsMulti" class="floating-btn" style="display: none;">periphery</button>
+        <button id="toggleEnvRingsMulti" class="floating-btn" style="display: none;">Окружение</button>
         <button id="playPause" class="floating-btn">Пауза</button>
       </div>
     </main>
@@ -746,6 +807,8 @@
     const authorSearchInGraph = document.getElementById("authorSearchInGraph");
     const searchAuthorBtn = document.getElementById("searchAuthorBtn");
     const authorSearchResults = document.getElementById("authorSearchResults");
+    const highlightedTeamIndicator = document.getElementById("highlightedTeamIndicator");
+    const highlightedTeamNumber = document.getElementById("highlightedTeamNumber");
     const linkToast = document.getElementById("linkToast");
     let focusRingRaf = null;
     let fitViewTimer = null;
@@ -1191,9 +1254,9 @@
         if (toggleEnvRingsMultiBtn) toggleEnvRingsMultiBtn.style.display = "block";
         if (toggleCoreRingsMultiBtn) toggleCoreRingsMultiBtn.style.display = "block";
         if (togglePeripheryRingsMultiBtn) togglePeripheryRingsMultiBtn.style.display = "block";
-        if (toggleEnvRingsMultiBtn) toggleEnvRingsMultiBtn.textContent = "Окружение [M]";
-        if (toggleCoreRingsMultiBtn) toggleCoreRingsMultiBtn.textContent = "core [M]";
-        if (togglePeripheryRingsMultiBtn) togglePeripheryRingsMultiBtn.textContent = "periphery [M]";
+        if (toggleEnvRingsMultiBtn) toggleEnvRingsMultiBtn.textContent = "Окружение";
+        if (toggleCoreRingsMultiBtn) toggleCoreRingsMultiBtn.textContent = "core";
+        if (togglePeripheryRingsMultiBtn) togglePeripheryRingsMultiBtn.textContent = "periphery";
         
         state.coreRingsEnabled = false;
         state.coreRingIndices = [];
@@ -1296,25 +1359,101 @@
       
       console.log(`[Teams Explorer] Authors in all teams:`, Array.from(authorsInAllTeams));
       
-      // Для каждой команды: окошко с номером команды + список её членов
+      // Для каждой команды: окошко с номером команды (с кнопкой развернуть) + список её членов
       teamsData.forEach((teamData) => {
-        // Окошко с номером команды
+        // Контейнер для членов команды
+        const membersContainer = document.createElement("div");
+        membersContainer.className = "team-members-container";
+        
+        // Окошко с номером команды и кнопкой развернуть
         const teamItem = document.createElement("div");
         teamItem.className = "author-row team-header";
+        const toggleIcon = document.createElement("span");
+        toggleIcon.textContent = "▼";
+        toggleIcon.style.marginRight = "8px";
+        toggleIcon.style.cursor = "pointer";
+        toggleIcon.style.userSelect = "none";
+        
         teamItem.innerHTML = `
-          <div class="row">
-            <div class="name">Команда #${teamData.team_id}</div>
+          <div class="row" style="justify-content: space-between; align-items: center;">
+            <div class="name" style="display: flex; align-items: center;">
+              <span class="toggle-icon">▼</span>
+              <span>Команда #${teamData.team_id}</span>
+            </div>
+            <button class="team-delete-btn" title="Удалить команду из отрисовки">🗑️</button>
           </div>
         `;
-        // По клику подсвечиваем команду через Cosmograph selection
-        teamItem.addEventListener("click", () => {
-          // Показываем сообщение о выделении команды
-          showTeamToast(`Выделена команда ${teamData.team_id}`);
+        
+        const toggleIconEl = teamItem.querySelector(".toggle-icon");
+        toggleIconEl.style.marginRight = "8px";
+        toggleIconEl.style.cursor = "pointer";
+        toggleIconEl.style.userSelect = "none";
+        
+        const deleteBtn = teamItem.querySelector(".team-delete-btn");
+        
+        // Обработчик клика на кнопку удаления
+        deleteBtn.addEventListener("click", (e) => {
+          e.stopPropagation(); // Предотвращаем всплытие события
+          
+          // Удаляем команду из списка выбранных
+          const index = state.selectedTeams.indexOf(teamData.team_id);
+          if (index !== -1) {
+            state.selectedTeams.splice(index, 1);
+          }
+          
+          // Если команда была выделена, снимаем выделение
+          if (state.highlightedTeamId === teamData.team_id) {
+            state.highlightedTeamId = null;
+            // Скрываем индикатор выделенной команды
+            if (highlightedTeamIndicator) highlightedTeamIndicator.classList.add("hidden");
+            if (state.graph && typeof state.graph.unselectAllPoints === "function") {
+              try {
+                state.graph.unselectAllPoints();
+              } catch (e) {
+                console.warn("[Teams Explorer] Failed to unselect all points:", e);
+              }
+            }
+          }
+          
+          // Перезагружаем граф
+          renderTeams();
+          if (state.selectedTeams.length === 0) {
+            clearTeamGraph();
+          } else if (state.selectedTeams.length === 1) {
+            state.selectedTeam = state.selectedTeams[0];
+            selectTeam(state.selectedTeams[0]);
+          } else {
+            loadMultipleTeamsGraph();
+          }
+        });
+        
+        // Обработчик клика на иконку развернуть/свернуть
+        toggleIconEl.addEventListener("click", (e) => {
+          e.stopPropagation(); // Предотвращаем всплытие события
+          const isExpanded = membersContainer.classList.contains("expanded");
+          if (isExpanded) {
+            membersContainer.classList.remove("expanded");
+            toggleIconEl.textContent = "▼";
+          } else {
+            membersContainer.classList.add("expanded");
+            toggleIconEl.textContent = "▲";
+          }
+        });
+        
+        // По клику на окошко команды (но не на иконку и не на кнопку удаления) подсвечиваем команду через Cosmograph selection
+        teamItem.addEventListener("click", (e) => {
+          // Если клик был на иконке или кнопке удаления, не обрабатываем
+          if (e.target === toggleIconEl || toggleIconEl.contains(e.target) || 
+              e.target === deleteBtn || deleteBtn.contains(e.target)) {
+            return;
+          }
           
           // Toggle: если команда уже подсвечена, снимаем подсветку
           if (state.highlightedTeamId === teamData.team_id) {
             state.highlightedTeamId = null;
             unhighlightTeamNodes(teamData.team_id);
+            // Скрываем индикатор выделенной команды
+            if (highlightedTeamIndicator) highlightedTeamIndicator.classList.add("hidden");
             // Сбрасываем состояния кнопок при снятии выделения
             state.envRingsEnabled = false;
             state.coreRingsEnabled = false;
@@ -1337,6 +1476,11 @@
             }
             state.highlightedTeamId = teamData.team_id;
             highlightTeamNodes(teamData.team_id);
+            // Показываем индикатор выделенной команды
+            if (highlightedTeamIndicator && highlightedTeamNumber) {
+              highlightedTeamNumber.textContent = teamData.team_id;
+              highlightedTeamIndicator.classList.remove("hidden");
+            }
             // Сбрасываем состояния кнопок при переключении команды
             state.envRingsEnabled = false;
             state.coreRingsEnabled = false;
@@ -1346,6 +1490,7 @@
             togglePeripheryRingsBtn.textContent = "periphery";
           }
         });
+        
         authorsList.appendChild(teamItem);
         
         // Список членов команды
@@ -1363,9 +1508,11 @@
               </div>
             `;
             item.addEventListener("click", () => focusPointByAuthorId(a.id));
-            authorsList.appendChild(item);
+            membersContainer.appendChild(item);
           });
         }
+        
+        authorsList.appendChild(membersContainer);
       });
       
       // Обновляем teamMembers для подсветки
@@ -1964,9 +2111,17 @@
         focusPointOnLabelClick: false,
         onPointClick: (index) => {
           if (typeof index !== "number") return;
+          // Помечаем, что был клик на узел
+          if (window.wasPointOrLinkClick !== undefined) {
+            window.wasPointOrLinkClick = true;
+          }
           showNodeInfoByIndex(index);
         },
         onLinkClick: (linkIndex, event) => {
+          // Помечаем, что был клик на ребро
+          if (window.wasPointOrLinkClick !== undefined) {
+            window.wasPointOrLinkClick = true;
+          }
           const e = state.edges?.[linkIndex];
           if (!e) {
             showLinkToastAt(`Ребро #${linkIndex}`, event?.clientX ?? 12, event?.clientY ?? 12);
@@ -1996,6 +2151,40 @@
         
         state.controls.fit = new CosmographButtonFitView(state.graph, document.getElementById("fitControl"));
         state.controls.zoom = new CosmographButtonZoomInOut(state.graph, document.getElementById("zoomControl"));
+        
+        // Обработчик клика на пустое поле графа для снятия выделения команды
+        // Используем глобальный флаг для отслеживания кликов на узлы/ребра
+        window.wasPointOrLinkClick = false;
+        
+        // Обработчик клика на контейнер
+        container.addEventListener("click", (e) => {
+          // Небольшая задержка, чтобы обработчики Cosmograph успели сработать
+          setTimeout(() => {
+            // Если клик был на пустом месте (не на узле/ребре), снимаем выделение команды
+            if (!window.wasPointOrLinkClick && state.highlightedTeamId) {
+              state.highlightedTeamId = null;
+              // Скрываем индикатор выделенной команды
+              if (highlightedTeamIndicator) highlightedTeamIndicator.classList.add("hidden");
+              // Снимаем выделение со всех точек
+              if (state.graph && typeof state.graph.unselectAllPoints === "function") {
+                try {
+                  state.graph.unselectAllPoints();
+                } catch (err) {
+                  console.warn("[Teams Explorer] Failed to unselect all points:", err);
+                }
+              }
+              // Сбрасываем состояния кнопок
+              state.envRingsEnabled = false;
+              state.coreRingsEnabled = false;
+              state.peripheryRingsEnabled = false;
+              if (toggleEnvRingsBtn) toggleEnvRingsBtn.textContent = "Окружение";
+              if (toggleCoreRingsBtn) toggleCoreRingsBtn.textContent = "core";
+              if (togglePeripheryRingsBtn) togglePeripheryRingsBtn.textContent = "periphery";
+            }
+            // Сбрасываем флаг для следующего клика
+            window.wasPointOrLinkClick = false;
+          }, 100);
+        });
         
         const uploadStart = performance.now();
         await state.graph.dataUploaded();
@@ -2418,7 +2607,7 @@
         }
         
         state.coreRingsEnabled = !state.coreRingsEnabled;
-        toggleCoreRingsMultiBtn.textContent = state.coreRingsEnabled ? "core [M] ✓" : "core [M]";
+        toggleCoreRingsMultiBtn.textContent = state.coreRingsEnabled ? "core ✓" : "core";
         
         // Обновляем индексы для отрисовки колец
         state.coreRingIndices = getTeamRoleIndices(state.highlightedTeamId, "core");
@@ -2454,7 +2643,7 @@
         }
         
         state.peripheryRingsEnabled = !state.peripheryRingsEnabled;
-        togglePeripheryRingsMultiBtn.textContent = state.peripheryRingsEnabled ? "periphery [M] ✓" : "periphery [M]";
+        togglePeripheryRingsMultiBtn.textContent = state.peripheryRingsEnabled ? "periphery ✓" : "periphery";
         
         // Обновляем индексы для отрисовки колец
         state.peripheryRingIndices = getTeamRoleIndices(state.highlightedTeamId, "periphery");
