@@ -138,6 +138,58 @@
       justify-content: space-between;
       gap: 8px;
     }
+    .author-row.team-header {
+      background: rgba(15, 106, 235, 0.08);
+      border-left: 3px solid var(--accent);
+      font-weight: 600;
+      cursor: default;
+    }
+    .author-row.team-header:hover {
+      background: rgba(15, 106, 235, 0.12);
+    }
+    .author-row.toggle-expand {
+      background: rgba(15, 106, 235, 0.05);
+      border-left: 3px solid var(--accent);
+      font-weight: 500;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--accent);
+    }
+    .author-row.toggle-expand:hover {
+      background: rgba(15, 106, 235, 0.1);
+    }
+    .team-members-container {
+      display: none;
+    }
+    .team-members-container.expanded {
+      display: block;
+    }
+    .team-delete-btn {
+      width: 24px;
+      height: 24px;
+      background: #dc3545;
+      border: none;
+      border-radius: 4px;
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      padding: 0;
+      flex-shrink: 0;
+      transition: background-color 0.15s ease;
+    }
+    .team-delete-btn:hover {
+      background: #c82333;
+    }
+    .team-delete-btn:active {
+      background: #bd2130;
+    }
+    .author-row.in-all-teams {
+      border: 2px solid #000;
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+    }
     .author-row, .pub-row {
       padding: 10px;
       border-radius: 10px;
@@ -158,6 +210,38 @@
     .chip.core { background: var(--accent-2); }
     .chip.periphery { background: var(--accent-3); }
     .chip.other { background: #9a9a9a; }
+    .author-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      background: #e9e9ee;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      font-size: 13px;
+      color: var(--text);
+    }
+    .author-chip-remove {
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      color: var(--muted);
+      padding: 0;
+      margin: 0;
+      background: none;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .author-chip-remove:hover {
+      background: rgba(0, 0, 0, 0.1);
+      color: var(--text);
+    }
     .pub-title { font-weight: 600; margin-bottom: 4px; }
     .central {
       position: relative;
@@ -339,6 +423,33 @@
     .modal .control { margin-bottom: 10px; }
     .small { font-size: 12px; color: var(--muted); }
     .empty { color: var(--muted); text-align: center; margin-top: 16px; }
+    .pub-row { cursor: pointer; }
+    .pub-row:hover { border-color: var(--accent); }
+    .publication-info {
+      display: grid;
+      gap: 16px;
+    }
+    .publication-info .field {
+      display: grid;
+      gap: 4px;
+    }
+    .publication-info .field-label {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .publication-info .field-value {
+      font-size: 14px;
+      color: var(--text);
+      word-break: break-word;
+      line-height: 1.5;
+    }
+    .publication-info .field-value.empty {
+      color: var(--muted);
+      font-style: italic;
+    }
     .node-info {
       display: grid;
       gap: 8px;
@@ -434,6 +545,25 @@
       line-height: 1.5;
     }
     .toolbar.hidden, .graph-controls.hidden { display: none; }
+    .highlighted-team-indicator {
+      position: absolute;
+      top: 70px;
+      left: 12px;
+      background: rgba(255, 255, 255, 0.95);
+      color: var(--text);
+      padding: 10px 18px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      z-index: 15;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .highlighted-team-indicator.hidden {
+      display: none !important;
+    }
   </style>
 </head>
 <body>
@@ -457,9 +587,18 @@
           <button id="searchBtn">Найти</button>
           <button id="clearSearchBtn" style="background:#e9e9ee; color:#1f1f26; box-shadow:none;">Сброс</button>
         </div>
+        <div id="selectedAuthorsChips" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; min-height: 24px;"></div>
       </div>
       <div class="split">
-        <h2>Список команд</h2>
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+          <h2 style="margin: 0;">Список команд</h2>
+          <select id="sortSelect" style="font-size: 12px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff;">
+            <option value="desc">↓ По убыванию размера</option>
+            <option value="asc">↑ По возрастанию размера</option>
+            <option value="period_desc">↓ По убыванию периода</option>
+            <option value="period_asc">↑ По возрастанию периода</option>
+          </select>
+        </div>
         <div id="teamsList" class="list"></div>
       </div>
     </aside>
@@ -488,12 +627,20 @@
           <input type="range" id="edgeWidth" min="0.2" max="1.5" step="0.05" value="1.2" />
         </div>
       </div>
+      <div id="highlightedTeamIndicator" class="highlighted-team-indicator hidden">
+        <span>Выделена команда #<span id="highlightedTeamNumber">-</span></span>
+      </div>
       <div class="graph-controls hidden">
         <div id="fitControl"></div>
         <div id="zoomControl"></div>
+        <!-- Кнопки для режима одной команды -->
         <button id="toggleCoreRings" class="floating-btn">core</button>
         <button id="togglePeripheryRings" class="floating-btn">periphery</button>
         <button id="toggleEnvRings" class="floating-btn">Окружение</button>
+        <!-- Кнопки для режима нескольких команд (отладка) -->
+        <button id="toggleCoreRingsMulti" class="floating-btn" style="display: none;">core</button>
+        <button id="togglePeripheryRingsMulti" class="floating-btn" style="display: none;">periphery</button>
+        <button id="toggleEnvRingsMulti" class="floating-btn" style="display: none;">Окружение</button>
         <button id="playPause" class="floating-btn">Пауза</button>
       </div>
     </main>
@@ -503,6 +650,13 @@
         <div>
           <div class="small">Выбранная команда</div>
           <h1 id="teamTitle">–</h1>
+        </div>
+      </div>
+      <div class="control" style="margin-bottom: 12px;">
+        <label for="authorSearchInGraph">Поиск автора на графе</label>
+        <div class="control-row">
+          <input id="authorSearchInGraph" type="text" placeholder="Фамилия или имя" style="flex: 1;" />
+          <button id="searchAuthorBtn" style="background: var(--accent); color: #fff; padding: 10px 12px; border: none; border-radius: 10px; cursor: pointer;">Найти</button>
         </div>
       </div>
       <div class="split">
@@ -578,6 +732,18 @@
     </div>
   </div>
 
+  <div id="publicationModal" class="modal">
+    <div class="modal-card wide">
+      <div class="row" style="align-items:center; justify-content: space-between; gap: 10px; margin-bottom: 16px;">
+        <h3 style="margin: 0;">Подробная информация о публикации</h3>
+        <button id="closePublicationModal" class="floating-btn" type="button" style="padding: 8px 10px; box-shadow: none;">Закрыть</button>
+      </div>
+      <div id="publicationContent" style="max-height: 70vh; overflow-y: auto;">
+        <div class="small" style="text-align: center; padding: 20px;">Загрузка...</div>
+      </div>
+    </div>
+  </div>
+
   <script type="module">
     import {
       Cosmograph,
@@ -589,7 +755,9 @@
       periods: [],
       teams: [],
       selectedPeriod: null,
-      selectedTeam: null,
+      selectedTeam: null, // для обратной совместимости, но теперь используем selectedTeams
+      selectedTeams: [], // массив выбранных команд
+      selectedAuthors: [], // массив выбранных авторов для поиска команд
       nodes: [],
       edges: [],
       nodeIndexById: new Map(),
@@ -601,12 +769,15 @@
       maxAuthorsPerDoc: 100,
       includeSinglePub: false,
       focusedPointIndex: null,
+      highlightedTeamId: null, // ID подсвеченной команды (для toggle)
+      highlightedTeamMembers: new Map(), // Map: author_id -> status в выделенной команде
       envRingsEnabled: false,
       envRingIndices: [],
       coreRingsEnabled: false,
       coreRingIndices: [],
       peripheryRingsEnabled: false,
       peripheryRingIndices: [],
+      sortOrder: "desc", // "asc" или "desc" для сортировки по количеству членов
       // We control the UI state for play/pause ourselves because Cosmograph's
       // `isSimulationRunning` can be transient/out-of-sync during data reloads.
       simulationPaused: false,
@@ -633,6 +804,8 @@
     const authorSearch = document.getElementById("authorSearch");
     const searchBtn = document.getElementById("searchBtn");
     const clearSearchBtn = document.getElementById("clearSearchBtn");
+    const selectedAuthorsChips = document.getElementById("selectedAuthorsChips");
+    const sortSelect = document.getElementById("sortSelect");
     const teamsList = document.getElementById("teamsList");
     const authorsList = document.getElementById("authorsList");
     const pubsList = document.getElementById("pubsList");
@@ -650,6 +823,9 @@
     const hideNodeInfoBtn = document.getElementById("hideNodeInfoBtn");
     const nodeTeamsBtn = document.getElementById("nodeTeamsBtn");
     const nodeTeams = document.getElementById("nodeTeams");
+    const publicationModal = document.getElementById("publicationModal");
+    const publicationContent = document.getElementById("publicationContent");
+    const closePublicationModal = document.getElementById("closePublicationModal");
     const graphPlaceholder = document.getElementById("graphPlaceholder");
     const toolbar = document.querySelector(".toolbar");
     const graphControls = document.querySelector(".graph-controls");
@@ -661,6 +837,15 @@
     const toggleCoreRingsBtn = document.getElementById("toggleCoreRings");
     const togglePeripheryRingsBtn = document.getElementById("togglePeripheryRings");
     const toggleEnvRingsBtn = document.getElementById("toggleEnvRings");
+    // Кнопки для режима нескольких команд (отладка)
+    const toggleCoreRingsMultiBtn = document.getElementById("toggleCoreRingsMulti");
+    const togglePeripheryRingsMultiBtn = document.getElementById("togglePeripheryRingsMulti");
+    const toggleEnvRingsMultiBtn = document.getElementById("toggleEnvRingsMulti");
+    const authorSearchInGraph = document.getElementById("authorSearchInGraph");
+    const searchAuthorBtn = document.getElementById("searchAuthorBtn");
+    const authorSearchResults = document.getElementById("authorSearchResults");
+    const highlightedTeamIndicator = document.getElementById("highlightedTeamIndicator");
+    const highlightedTeamNumber = document.getElementById("highlightedTeamNumber");
     const linkToast = document.getElementById("linkToast");
     let focusRingRaf = null;
     let fitViewTimer = null;
@@ -765,6 +950,9 @@
                 <div class="small">${status}</div>
               </div>
               <div class="subline">${t.sample_authors || "—"}</div>
+              <div class="subline" style="font-size: 11px; color: var(--muted);">
+                ${t.period ? `Период: ${t.period}` : t.periods ? `Периоды: ${t.periods}` : ""}
+              </div>
               <div class="subline">Всего авторов: ${t.authors_count} • core: ${t.core_count} • periphery: ${t.periphery_count}</div>
             </div>
           `;
@@ -829,6 +1017,90 @@
       return res.json();
     }
 
+    function formatFieldValue(value) {
+      if (value === null || value === undefined || value === "") {
+        return null;
+      }
+      if (typeof value === "boolean") {
+        return value ? "Да" : "Нет";
+      }
+      if (typeof value === "number") {
+        return String(value);
+      }
+      return String(value);
+    }
+
+    function formatFieldLabel(key) {
+      // Преобразуем snake_case и camelCase в читаемый формат
+      return key
+        .replace(/_/g, " ")
+        .replace(/([A-Z])/g, " $1")
+        .replace(/^./, (str) => str.toUpperCase())
+        .trim();
+    }
+
+    async function showPublicationDetail(docId) {
+      if (!docId) return;
+      
+      publicationModal.classList.add("active");
+      publicationContent.innerHTML = '<div class="small" style="text-align: center; padding: 20px;">Загрузка...</div>';
+      
+      try {
+        const data = await fetchJson(`/api/publications/${encodeURIComponent(String(docId))}`);
+        const pub = data.publication || {};
+        const authors = data.authors || [];
+        
+        // Сортируем поля: сначала важные (title, year, eid), затем остальные
+        const importantFields = ["eid", "title", "year"];
+        const otherFields = Object.keys(pub).filter(k => !importantFields.includes(k));
+        const sortedFields = [...importantFields, ...otherFields];
+        
+        let html = '<div class="publication-info">';
+        
+        // Отображаем поля публикации
+        for (const key of sortedFields) {
+          if (!(key in pub)) continue;
+          const value = formatFieldValue(pub[key]);
+          if (value === null) continue;
+          
+          html += `
+            <div class="field">
+              <div class="field-label">${formatFieldLabel(key)}</div>
+              <div class="field-value">${value}</div>
+            </div>
+          `;
+        }
+        
+        // Отображаем список авторов
+        if (authors.length > 0) {
+          html += `
+            <div class="field">
+              <div class="field-label">Авторы (${authors.length})</div>
+              <div class="field-value">
+                ${authors.map((a, idx) => {
+                  const name = fmtName(a);
+                  const seq = a.seq !== null && a.seq !== undefined ? ` [${a.seq}]` : "";
+                  return `${idx + 1}. ${name}${seq}`;
+                }).join("<br>")}
+              </div>
+            </div>
+          `;
+        }
+        
+        html += '</div>';
+        publicationContent.innerHTML = html;
+      } catch (error) {
+        publicationContent.innerHTML = `<div class="small" style="text-align: center; padding: 20px; color: #d32f2f;">Ошибка загрузки: ${error.message}</div>`;
+      }
+    }
+
+    function togglePublicationModal(show) {
+      publicationModal.classList.toggle("active", show);
+      if (!show) {
+        publicationContent.innerHTML = "";
+      }
+    }
+
     async function loadPeriods() {
       const data = await fetchJson("/api/periods");
       state.periods = data.periods || [];
@@ -845,11 +1117,37 @@
       }
     }
 
+    function renderSelectedAuthorsChips() {
+      if (!selectedAuthorsChips) return;
+      selectedAuthorsChips.innerHTML = "";
+      state.selectedAuthors.forEach((author, index) => {
+        const chip = document.createElement("div");
+        chip.className = "author-chip";
+        chip.innerHTML = `
+          <span>${author}</span>
+          <button class="author-chip-remove" data-index="${index}" title="Удалить">×</button>
+        `;
+        const removeBtn = chip.querySelector(".author-chip-remove");
+        removeBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const idx = parseInt(removeBtn.getAttribute("data-index"), 10);
+          state.selectedAuthors.splice(idx, 1);
+          renderSelectedAuthorsChips();
+          loadTeams();
+        });
+        selectedAuthorsChips.appendChild(chip);
+      });
+    }
+
     async function loadTeams() {
       if (!state.selectedPeriod) return;
-      const query = authorSearch.value.trim();
       const qs = new URLSearchParams({ period: state.selectedPeriod });
-      if (query) qs.set("query", query);
+      // Если есть выбранные авторы, передаём их как массив
+      if (state.selectedAuthors.length > 0) {
+        state.selectedAuthors.forEach((author) => {
+          qs.append("authors", author);
+        });
+      }
       const data = await fetchJson(`/api/teams?${qs.toString()}`);
       state.teams = data.teams || [];
       renderTeams();
@@ -858,17 +1156,68 @@
     function renderTeams() {
       teamsList.innerHTML = "";
       if (!state.teams.length) {
-        teamsList.innerHTML = '<div class="empty">Нет команд</div>';
+        teamsList.innerHTML = '<div class="empty">Нажмите "Найти" для отображения всех команд периода</div>';
         return;
       }
-      state.teams.forEach((team) => {
+      // Сортировка команд
+      const sortedTeams = [...state.teams].sort((a, b) => {
+        if (state.sortOrder === "period_desc" || state.sortOrder === "period_asc") {
+          // Сортировка по периоду (берем левое число - start_year)
+          const getPeriodValue = (team) => {
+            if (team.period) {
+              // Обычный период: берем левое число (start_year)
+              const [start] = team.period.split("-").map(Number);
+              return start || 0;
+            } else if (team.periods) {
+              // Период "2019-2025": берем минимальное start_year из всех периодов
+              const periods = team.periods.split(",").map(p => p.trim()).filter(p => p);
+              if (periods.length === 0) return 0;
+              const startYears = periods.map(p => {
+                const [start] = p.split("-").map(Number);
+                return start || 0;
+              });
+              return Math.min(...startYears);
+            }
+            return 0;
+          };
+          
+          const periodA = getPeriodValue(a);
+          const periodB = getPeriodValue(b);
+          
+          // period_desc (↓ По убыванию) = от большего к меньшему
+          // period_asc (↑ По возрастанию) = от меньшего к большему
+          if (state.sortOrder === "period_asc") {
+            // По возрастанию: меньшие значения первыми
+            const result = periodA - periodB;
+            // Если значения равны, сортируем по team_id для стабильности
+            return result !== 0 ? result : a.team_id - b.team_id;
+          } else {
+            // По убыванию: большие значения первыми
+            const result = periodB - periodA;
+            // Если значения равны, сортируем по team_id для стабильности
+            return result !== 0 ? result : a.team_id - b.team_id;
+          }
+        } else {
+          // Сортировка по количеству членов
+          if (state.sortOrder === "asc") {
+            return a.authors_count - b.authors_count;
+          } else {
+            return b.authors_count - a.authors_count;
+          }
+        }
+      });
+      sortedTeams.forEach((team) => {
         const item = document.createElement("div");
-        item.className = "team-item" + (state.selectedTeam === team.team_id ? " active" : "");
+        const isSelected = state.selectedTeams.includes(team.team_id);
+        item.className = "team-item" + (isSelected ? " active" : "");
         item.innerHTML = `
           <div class="row">
             <div>
               <div class="team-title">Команда #${team.team_id}</div>
               <div class="team-sub">${team.sample_authors || "—"}</div>
+              <div class="team-sub" style="font-size: 11px; color: var(--muted); margin-top: 2px;">
+                ${team.period ? `Период: ${team.period}` : team.periods ? `Периоды: ${team.periods}` : ""}
+              </div>
             </div>
             <div>
               <span class="badge"><span class="dot core"></span>${team.core_count}</span>
@@ -877,9 +1226,40 @@
           </div>
           <div class="team-sub">Всего авторов: ${team.authors_count}</div>
         `;
-        item.addEventListener("click", () => selectTeam(team.team_id));
+        item.addEventListener("click", (e) => {
+          if (e.ctrlKey || e.metaKey) {
+            // Ctrl+клик или Cmd+клик (Mac) - добавляем/удаляем команду
+            toggleTeamSelection(team.team_id);
+          } else {
+            // Обычный клик - выбираем только эту команду
+            selectTeam(team.team_id);
+          }
+        });
         teamsList.appendChild(item);
       });
+    }
+
+    function toggleTeamSelection(teamId) {
+      const index = state.selectedTeams.indexOf(teamId);
+      if (index === -1) {
+        // Добавляем команду
+        state.selectedTeams.push(teamId);
+      } else {
+        // Удаляем команду
+        state.selectedTeams.splice(index, 1);
+      }
+      renderTeams();
+      if (state.selectedTeams.length === 0) {
+        // Если нет выбранных команд, очищаем граф
+        clearTeamGraph();
+      } else if (state.selectedTeams.length === 1) {
+        // Если одна команда, используем старую логику
+        state.selectedTeam = state.selectedTeams[0];
+        selectTeam(state.selectedTeams[0]);
+      } else {
+        // Если несколько команд, загружаем объединённый граф
+        loadMultipleTeamsGraph();
+      }
     }
 
     async function loadGraph() {
@@ -887,12 +1267,24 @@
         showPlaceholder();
         return;
       }
+      const totalStart = performance.now();
+      console.log(`[PERF] Starting graph load: period=${state.selectedPeriod}, max_authors=${state.maxAuthorsPerDoc}`);
+      
       const qs = new URLSearchParams({
         period: state.selectedPeriod,
         max_authors_per_doc: String(state.maxAuthorsPerDoc),
         include_single_pub: state.includeSinglePub ? "true" : "false",
       });
+      
+      const fetchStart = performance.now();
       const data = await fetchJson(`/api/graph?${qs.toString()}`);
+      const fetchTime = performance.now() - fetchStart;
+      console.log(`[PERF] Fetch time: ${fetchTime.toFixed(2)}ms, nodes: ${data.nodes?.length || 0}, edges: ${data.edges?.length || 0}`);
+      if (data._perf) {
+        console.log(`[PERF] Backend times:`, data._perf);
+      }
+      
+      const processStart = performance.now();
       state.nodes = (data.nodes || []).map((n, idx) => ({
         ...n,
         idx,
@@ -919,7 +1311,368 @@
         targetIndex: indexById.get(e.target) ?? -1,
         pair: `${e.source}|${e.target}`,
       }));
+      const processTime = performance.now() - processStart;
+      console.log(`[PERF] Data processing: ${processTime.toFixed(2)}ms`);
+      
+      const buildStart = performance.now();
       await buildGraph({ reloadData: true });
+      const buildTime = performance.now() - buildStart;
+      console.log(`[PERF] Graph build: ${buildTime.toFixed(2)}ms`);
+      
+      const totalTime = performance.now() - totalStart;
+      console.log(`[PERF] Total graph load time: ${totalTime.toFixed(2)}ms`);
+    }
+
+    async function loadMultipleTeamsGraph() {
+      if (!state.selectedPeriod || state.selectedTeams.length < 2) {
+        return;
+      }
+      try {
+        const totalStart = performance.now();
+        console.log(`[PERF] Loading multiple teams graph: teams=${state.selectedTeams.join(",")}, period=${state.selectedPeriod}`);
+        
+        const qs = new URLSearchParams({
+          team_ids: state.selectedTeams.join(","),
+          period: state.selectedPeriod,
+          max_authors_per_doc: String(state.maxAuthorsPerDoc),
+        });
+        
+        const fetchStart = performance.now();
+        const data = await fetchJson(`/api/teams/multiple/graph?${qs.toString()}`);
+        const fetchTime = performance.now() - fetchStart;
+        console.log(`[PERF] Multiple teams fetch time: ${fetchTime.toFixed(2)}ms, nodes: ${data.nodes?.length || 0}, edges: ${data.edges?.length || 0}`);
+        
+        const processStart = performance.now();
+        state.nodes = (data.nodes || []).map((n, idx) => ({
+          ...n,
+          idx,
+          label: fmtName(n),
+        }));
+        state.nodeIndexById = new Map(state.nodes.map((n) => [String(n.id), n.idx]));
+        state.focusedPointIndex = null;
+        // Сбрасываем выделение команды при загрузке нескольких команд
+        state.highlightedTeamId = null;
+        state.highlightedTeamMembers.clear();
+        
+        state.envRingsEnabled = false;
+        state.envRingIndices = [];
+        // В режиме нескольких команд показываем специальные кнопки
+        if (toggleEnvRingsBtn) toggleEnvRingsBtn.style.display = "none";
+        if (toggleCoreRingsBtn) toggleCoreRingsBtn.style.display = "none";
+        if (togglePeripheryRingsBtn) togglePeripheryRingsBtn.style.display = "none";
+        if (toggleEnvRingsMultiBtn) toggleEnvRingsMultiBtn.style.display = "block";
+        if (toggleCoreRingsMultiBtn) toggleCoreRingsMultiBtn.style.display = "block";
+        if (togglePeripheryRingsMultiBtn) togglePeripheryRingsMultiBtn.style.display = "block";
+        if (toggleEnvRingsMultiBtn) toggleEnvRingsMultiBtn.textContent = "Окружение";
+        if (toggleCoreRingsMultiBtn) toggleCoreRingsMultiBtn.textContent = "core";
+        if (togglePeripheryRingsMultiBtn) togglePeripheryRingsMultiBtn.textContent = "periphery";
+        
+        state.coreRingsEnabled = false;
+        state.coreRingIndices = [];
+        state.peripheryRingsEnabled = false;
+        state.peripheryRingIndices = [];
+        const indexById = new Map(state.nodes.map((n) => [n.id, n.idx]));
+        state.edges = (data.edges || []).map((e) => ({
+          ...e,
+          sourceIndex: indexById.get(e.source) ?? -1,
+          targetIndex: indexById.get(e.target) ?? -1,
+          pair: `${e.source}|${e.target}`,
+          type: e.type || "collaboration", // "collaboration" или "duplicate"
+        }));
+        const processTime = performance.now() - processStart;
+        console.log(`[PERF] Multiple teams data processing: ${processTime.toFixed(2)}ms`);
+        
+        // Загружаем информацию о командах для правой панели
+        await loadSelectedTeamsInfo();
+        
+        const buildStart = performance.now();
+        await buildGraph({ reloadData: true });
+        const buildTime = performance.now() - buildStart;
+        console.log(`[PERF] Multiple teams graph build: ${buildTime.toFixed(2)}ms`);
+        
+        const totalTime = performance.now() - totalStart;
+        console.log(`[PERF] Total multiple teams graph load time: ${totalTime.toFixed(2)}ms`);
+      } catch (error) {
+        console.error(`[Teams Explorer] Error loading multiple teams graph:`, error);
+        throw error;
+      }
+    }
+
+    async function loadSelectedTeamsInfo() {
+      // Загружаем информацию о выбранных командах для правой панели
+      if (!state.selectedPeriod || state.selectedTeams.length === 0) {
+        return;
+      }
+      try {
+        const teamsData = [];
+        for (const teamId of state.selectedTeams) {
+          const qs = new URLSearchParams({ period: state.selectedPeriod });
+          const data = await fetchJson(`/api/teams/${teamId}?${qs.toString()}`);
+          console.log(`[Teams Explorer] Loaded team ${teamId} data:`, data);
+          // API возвращает {authors: [...], publications: [...]}, без поля team
+          if (data && data.authors) {
+            teamsData.push({
+              team_id: teamId,
+              authors: data.authors || [],
+            });
+          } else {
+            console.warn(`[Teams Explorer] Team ${teamId} data missing authors:`, data);
+          }
+        }
+        // Обновляем правую панель - показываем команды и их членов
+        renderSelectedTeams(teamsData);
+        // Обновляем панель публикаций - показываем команды
+        renderPublications(teamsData.map(t => ({ team_id: t.team_id })));
+      } catch (error) {
+        console.error(`[Teams Explorer] Error loading teams info:`, error);
+      }
+    }
+
+    function renderSelectedTeams(teamsData) {
+      // Отображаем список команд и их членов в правой панели
+      authorsList.innerHTML = "";
+      
+      console.log(`[Teams Explorer] Rendering ${teamsData.length} teams:`, teamsData);
+      
+      if (teamsData.length === 0) {
+        authorsList.innerHTML = '<div class="empty">Нет команд</div>';
+        return;
+      }
+      
+      // Обновляем заголовок с номерами команд
+      if (state.selectedTeams.length > 1) {
+        teamTitle.textContent = `Команды: ${state.selectedTeams.join(", ")}`;
+      } else {
+        teamTitle.textContent = `Команда #${state.selectedTeams[0]}`;
+      }
+      
+      // Находим авторов, которые есть во всех выбранных командах
+      const authorsInAllTeams = new Set();
+      if (teamsData.length > 1) {
+        // Начинаем с авторов первой команды
+        const firstTeamAuthorIds = new Set((teamsData[0].authors || []).map(a => String(a.id)));
+        
+        // Проверяем, какие из них есть во всех остальных командах
+        for (const authorId of firstTeamAuthorIds) {
+          let inAllTeams = true;
+          for (let i = 1; i < teamsData.length; i++) {
+            const teamAuthorIds = new Set((teamsData[i].authors || []).map(a => String(a.id)));
+            if (!teamAuthorIds.has(authorId)) {
+              inAllTeams = false;
+              break;
+            }
+          }
+          if (inAllTeams) {
+            authorsInAllTeams.add(authorId);
+          }
+        }
+      }
+      
+      console.log(`[Teams Explorer] Authors in all teams:`, Array.from(authorsInAllTeams));
+      
+      // Для каждой команды: окошко с номером команды (с кнопкой развернуть) + список её членов
+      teamsData.forEach((teamData) => {
+        // Контейнер для членов команды
+        const membersContainer = document.createElement("div");
+        membersContainer.className = "team-members-container";
+        
+        // Окошко с номером команды и кнопкой развернуть
+        const teamItem = document.createElement("div");
+        teamItem.className = "author-row team-header";
+        const toggleIcon = document.createElement("span");
+        toggleIcon.textContent = "▼";
+        toggleIcon.style.marginRight = "8px";
+        toggleIcon.style.cursor = "pointer";
+        toggleIcon.style.userSelect = "none";
+        
+        teamItem.innerHTML = `
+          <div class="row" style="justify-content: space-between; align-items: center;">
+            <div class="name" style="display: flex; align-items: center;">
+              <span class="toggle-icon">▼</span>
+              <span>Команда #${teamData.team_id}</span>
+            </div>
+            <button class="team-delete-btn" title="Удалить команду из отрисовки">🗑️</button>
+          </div>
+        `;
+        
+        const toggleIconEl = teamItem.querySelector(".toggle-icon");
+        toggleIconEl.style.marginRight = "8px";
+        toggleIconEl.style.cursor = "pointer";
+        toggleIconEl.style.userSelect = "none";
+        
+        const deleteBtn = teamItem.querySelector(".team-delete-btn");
+        
+        // Обработчик клика на кнопку удаления
+        deleteBtn.addEventListener("click", (e) => {
+          e.stopPropagation(); // Предотвращаем всплытие события
+          
+          // Удаляем команду из списка выбранных
+          const index = state.selectedTeams.indexOf(teamData.team_id);
+          if (index !== -1) {
+            state.selectedTeams.splice(index, 1);
+          }
+          
+          // Если команда была выделена, снимаем выделение
+          if (state.highlightedTeamId === teamData.team_id) {
+            state.highlightedTeamId = null;
+            state.highlightedTeamMembers.clear();
+            // Скрываем индикатор выделенной команды
+            if (highlightedTeamIndicator) highlightedTeamIndicator.classList.add("hidden");
+            // Пересчитываем цвета узлов и ребер (возвращаем к исходным)
+            void buildGraph();
+            if (state.graph && typeof state.graph.unselectAllPoints === "function") {
+              try {
+                state.graph.unselectAllPoints();
+              } catch (e) {
+                console.warn("[Teams Explorer] Failed to unselect all points:", e);
+              }
+            }
+          }
+          
+          // Перезагружаем граф
+          renderTeams();
+          if (state.selectedTeams.length === 0) {
+            clearTeamGraph();
+          } else if (state.selectedTeams.length === 1) {
+            state.selectedTeam = state.selectedTeams[0];
+            selectTeam(state.selectedTeams[0]);
+          } else {
+            loadMultipleTeamsGraph();
+          }
+        });
+        
+        // Обработчик клика на иконку развернуть/свернуть
+        toggleIconEl.addEventListener("click", (e) => {
+          e.stopPropagation(); // Предотвращаем всплытие события
+          const isExpanded = membersContainer.classList.contains("expanded");
+          if (isExpanded) {
+            membersContainer.classList.remove("expanded");
+            toggleIconEl.textContent = "▼";
+          } else {
+            membersContainer.classList.add("expanded");
+            toggleIconEl.textContent = "▲";
+          }
+        });
+        
+        // По клику на окошко команды (но не на иконку и не на кнопку удаления) подсвечиваем команду через Cosmograph selection
+        teamItem.addEventListener("click", (e) => {
+          // Если клик был на иконке или кнопке удаления, не обрабатываем
+          if (e.target === toggleIconEl || toggleIconEl.contains(e.target) || 
+              e.target === deleteBtn || deleteBtn.contains(e.target)) {
+            return;
+          }
+          
+          // Toggle: если команда уже подсвечена, снимаем подсветку
+          if (state.highlightedTeamId === teamData.team_id) {
+            state.highlightedTeamId = null;
+            state.highlightedTeamMembers.clear();
+            unhighlightTeamNodes(teamData.team_id);
+            // Скрываем индикатор выделенной команды
+            if (highlightedTeamIndicator) highlightedTeamIndicator.classList.add("hidden");
+            // Пересчитываем цвета узлов и ребер (возвращаем к исходным)
+            void buildGraph();
+            // Пересчитываем цвета узлов и ребер (возвращаем к исходным)
+            void buildGraph();
+            // Сбрасываем состояния кнопок при снятии выделения
+            state.envRingsEnabled = false;
+            state.coreRingsEnabled = false;
+            state.peripheryRingsEnabled = false;
+            toggleEnvRingsBtn.textContent = "Окружение";
+            toggleCoreRingsBtn.textContent = "core";
+            togglePeripheryRingsBtn.textContent = "periphery";
+            // Снимаем выделение со всех точек
+            if (state.graph && typeof state.graph.unselectAllPoints === "function") {
+              try {
+                state.graph.unselectAllPoints();
+              } catch (e) {
+                console.warn("[Teams Explorer] Failed to unselect all points:", e);
+              }
+            }
+          } else {
+            // Если была выделена другая команда, снимаем её выделение
+            if (state.highlightedTeamId) {
+              unhighlightTeamNodes(state.highlightedTeamId);
+            }
+            state.highlightedTeamId = teamData.team_id;
+            // Сохраняем информацию о членах выделенной команды (author_id -> status)
+            state.highlightedTeamMembers.clear();
+            if (teamData.authors && teamData.authors.length > 0) {
+              teamData.authors.forEach((a) => {
+                state.highlightedTeamMembers.set(String(a.id), a.status || null);
+              });
+            }
+            highlightTeamNodes(teamData.team_id);
+            // Показываем индикатор выделенной команды
+            if (highlightedTeamIndicator && highlightedTeamNumber) {
+              highlightedTeamNumber.textContent = teamData.team_id;
+              highlightedTeamIndicator.classList.remove("hidden");
+            }
+            // Пересчитываем цвета узлов и ребер для выделенной команды
+            void buildGraph();
+            // Сбрасываем состояния кнопок при переключении команды
+            state.envRingsEnabled = false;
+            state.coreRingsEnabled = false;
+            state.peripheryRingsEnabled = false;
+            toggleEnvRingsBtn.textContent = "Окружение";
+            toggleCoreRingsBtn.textContent = "core";
+            togglePeripheryRingsBtn.textContent = "periphery";
+          }
+        });
+        
+        authorsList.appendChild(teamItem);
+        
+        // Список членов команды
+        if (teamData.authors && teamData.authors.length > 0) {
+          teamData.authors.forEach((a) => {
+            const authorId = String(a.id);
+            const isInAllTeams = authorsInAllTeams.has(authorId);
+            
+            const item = document.createElement("div");
+            item.className = "author-row" + (isInAllTeams ? " in-all-teams" : "");
+            item.innerHTML = `
+              <div class="row">
+                <div class="name"><span class="dot ${a.status}"></span> ${fmtName(a)}</div>
+                <div class="status">${a.status}</div>
+              </div>
+            `;
+            item.addEventListener("click", () => focusPointByAuthorId(a.id));
+            membersContainer.appendChild(item);
+          });
+        }
+        
+        authorsList.appendChild(membersContainer);
+      });
+      
+      // Обновляем teamMembers для подсветки
+      state.teamMembers = new Map();
+      teamsData.forEach((teamData) => {
+        (teamData.authors || []).forEach((a) => {
+          state.teamMembers.set(String(a.id), a.status || "core");
+        });
+      });
+    }
+
+    function clearTeamGraph() {
+      if (state.graph) {
+        state.graph.destroy().catch((e) => {
+          console.warn("[Teams Explorer] Failed to destroy graph", e);
+        });
+        state.graph = null;
+        state.controls.fit?.remove?.();
+        state.controls.zoom?.remove?.();
+        state.controls = {};
+        document.getElementById("fitControl").innerHTML = "";
+        document.getElementById("zoomControl").innerHTML = "";
+      }
+      state.simulationPaused = false;
+      syncPlayPauseButton();
+      showPlaceholder();
+      teamTitle.textContent = "–";
+      authorsList.innerHTML = "";
+      pubsList.innerHTML = "";
+      state.teamMembers.clear();
+      state.nodes = [];
+      state.edges = [];
     }
 
     async function loadTeamGraph(teamId) {
@@ -928,17 +1681,27 @@
         return;
       }
       try {
-        console.log(`[Teams Explorer] Loading graph for team ${teamId}, period ${state.selectedPeriod}`);
+        const totalStart = performance.now();
+        console.log(`[PERF] Loading team graph: team=${teamId}, period=${state.selectedPeriod}`);
+        
         const qs = new URLSearchParams({
           period: state.selectedPeriod,
           max_authors_per_doc: String(state.maxAuthorsPerDoc),
         });
+        
+        const fetchStart = performance.now();
         const data = await fetchJson(`/api/teams/${teamId}/graph?${qs.toString()}`);
+        const fetchTime = performance.now() - fetchStart;
+        console.log(`[PERF] Team fetch time: ${fetchTime.toFixed(2)}ms, nodes: ${data.nodes?.length || 0}, edges: ${data.edges?.length || 0}`);
+        if (data._perf) {
+          console.log(`[PERF] Backend times:`, data._perf);
+        }
         
         const teamNodes = (data.nodes || []).filter((n) => n.status);
         const envNodes = (data.nodes || []).filter((n) => !n.status);
-        console.log(`[Teams Explorer] Loaded ${teamNodes.length} team nodes, ${envNodes.length} environment nodes`);
+        console.log(`[PERF] Team nodes: ${teamNodes.length}, environment nodes: ${envNodes.length}`);
         
+        const processStart = performance.now();
         state.nodes = (data.nodes || []).map((n, idx) => ({
           ...n,
           idx,
@@ -946,6 +1709,18 @@
         }));
         state.nodeIndexById = new Map(state.nodes.map((n) => [String(n.id), n.idx]));
         state.focusedPointIndex = null;
+        // Сбрасываем выделение команды при переключении на одну команду
+        state.highlightedTeamId = null;
+        state.highlightedTeamMembers.clear();
+        
+        // В режиме одной команды показываем обычные кнопки
+        toggleEnvRingsBtn.style.display = "block";
+        toggleCoreRingsBtn.style.display = "block";
+        togglePeripheryRingsBtn.style.display = "block";
+        toggleEnvRingsMultiBtn.style.display = "none";
+        toggleCoreRingsMultiBtn.style.display = "none";
+        togglePeripheryRingsMultiBtn.style.display = "none";
+        
         state.envRingIndices = state.nodes.filter((n) => !n.status).map((n) => n.idx);
         toggleEnvRingsBtn.disabled = state.envRingIndices.length === 0;
         toggleEnvRingsBtn.textContent = "Окружение";
@@ -965,8 +1740,16 @@
           targetIndex: indexById.get(e.target) ?? -1,
           pair: `${e.source}|${e.target}`,
         }));
-        console.log(`[Teams Explorer] Loaded ${state.edges.length} edges`);
+        const processTime = performance.now() - processStart;
+        console.log(`[PERF] Team data processing: ${processTime.toFixed(2)}ms, edges: ${state.edges.length}`);
+        
+        const buildStart = performance.now();
         await buildGraph({ reloadData: true });
+        const buildTime = performance.now() - buildStart;
+        console.log(`[PERF] Team graph build: ${buildTime.toFixed(2)}ms`);
+        
+        const totalTime = performance.now() - totalStart;
+        console.log(`[PERF] Total team graph load time: ${totalTime.toFixed(2)}ms`);
       } catch (error) {
         console.error(`[Teams Explorer] Error loading team graph:`, error);
         throw error;
@@ -975,11 +1758,163 @@
 
     function focusPointByAuthorId(authorId) {
       const idx = state.nodeIndexById.get(String(authorId));
-      if (typeof idx !== "number") return;
+      if (typeof idx !== "number") {
+        // Автор не найден в текущем графе
+        showTeamToast("Автор не найден в текущем графе");
+        return;
+      }
       // Toggle: clicking the same author again removes focus/boost
       state.focusedPointIndex = state.focusedPointIndex === idx ? null : idx;
       updateFocusRing();
       void buildGraph();
+    }
+    
+    async function searchAuthorInGraph(query) {
+      if (!query || !query.trim()) {
+        return;
+      }
+      
+      if (!state.selectedPeriod) {
+        showTeamToast("Сначала выберите период");
+        return;
+      }
+      
+      try {
+        const qs = new URLSearchParams({
+          query: query.trim(),
+          period: state.selectedPeriod,
+        });
+        const data = await fetchJson(`/api/authors/search?${qs.toString()}`);
+        
+        if (!data.authors || data.authors.length === 0) {
+          showTeamToast("Авторы не найдены");
+          return;
+        }
+        
+        // Берем первого автора из результатов
+        const author = data.authors[0];
+        const authorId = String(author.id);
+        
+        // Проверяем, есть ли автор в текущем графе
+        if (state.nodeIndexById.has(authorId)) {
+          focusPointByAuthorId(author.id);
+        } else {
+          showTeamToast("Автор не найден в текущем графе");
+        }
+      } catch (error) {
+        console.error("[Teams Explorer] Error searching authors:", error);
+        showTeamToast("Ошибка при поиске авторов");
+      }
+    }
+    
+    function highlightTeamNodes(teamId) {
+      if (!state.graph || !state.nodes.length) {
+        return;
+      }
+      
+      // Находим индексы всех узлов команды
+      const teamNodeIndices = [];
+      const teamIdNum = Number(teamId);
+      
+      for (const node of state.nodes) {
+        if (node.team_ids && Array.isArray(node.team_ids)) {
+          const belongsToTeam = node.team_ids.some(tid => 
+            Number(tid) === teamIdNum || String(tid) === String(teamId)
+          );
+          if (belongsToTeam && typeof node.idx === "number") {
+            teamNodeIndices.push(node.idx);
+          }
+        }
+      }
+      
+      if (teamNodeIndices.length === 0) {
+        console.warn(`[Teams Explorer] No nodes found for team ${teamId}`);
+        return;
+      }
+      
+      console.log(`[Teams Explorer] Highlighting team ${teamId}: ${teamNodeIndices.length} nodes`);
+      
+      // Выделяем узлы команды через Cosmograph API (заменяем текущее выделение)
+      if (state.graph && typeof state.graph.selectPoints === "function") {
+        try {
+          state.graph.selectPoints(teamNodeIndices, false); // false = replace selection
+        } catch (e) {
+          console.warn("[Teams Explorer] Failed to select points:", e);
+        }
+      } else {
+        console.warn("[Teams Explorer] selectPoints method not available");
+      }
+    }
+    
+    function unhighlightTeamNodes(teamId) {
+      if (!state.graph) {
+        return;
+      }
+      
+      // Находим индексы всех узлов команды для удаления из выделения
+      const teamNodeIndices = [];
+      const teamIdNum = Number(teamId);
+      
+      for (const node of state.nodes) {
+        if (node.team_ids && Array.isArray(node.team_ids)) {
+          const belongsToTeam = node.team_ids.some(tid => 
+            Number(tid) === teamIdNum || String(tid) === String(teamId)
+          );
+          if (belongsToTeam && typeof node.idx === "number") {
+            teamNodeIndices.push(node.idx);
+          }
+        }
+      }
+      
+      if (teamNodeIndices.length === 0) {
+        return;
+      }
+      
+      // Удаляем только узлы этой команды из выделения
+      if (state.graph && typeof state.graph.unselectPointsByIndicies === "function") {
+        try {
+          state.graph.unselectPointsByIndicies(teamNodeIndices);
+        } catch (e) {
+          console.warn("[Teams Explorer] Failed to unselect points:", e);
+        }
+      } else if (state.graph && typeof state.graph.unselectAllPoints === "function") {
+        // Fallback: если метод недоступен, снимаем всё выделение
+        try {
+          state.graph.unselectAllPoints();
+        } catch (e) {
+          console.warn("[Teams Explorer] Failed to unselect all points:", e);
+        }
+      }
+    }
+    
+    function getTeamRoleIndices(teamId, role) {
+      // Возвращает индексы узлов указанной роли для указанной команды
+      // role может быть: "core", "periphery", или null (для окружения)
+      const indices = [];
+      const teamIdNum = Number(teamId);
+      
+      for (const node of state.nodes) {
+        if (node.team_ids && Array.isArray(node.team_ids)) {
+          const belongsToTeam = node.team_ids.some(tid => 
+            Number(tid) === teamIdNum || String(tid) === String(teamId)
+          );
+          
+          if (belongsToTeam && typeof node.idx === "number") {
+            // Проверяем роль узла
+            if (role === null) {
+              // Окружение: узел без статуса или статус null
+              if (!node.status || node.status === null) {
+                indices.push(node.idx);
+              }
+            } else if (node.status === role) {
+              // Узел с нужной ролью (core или periphery)
+              indices.push(node.idx);
+            }
+          }
+        }
+      }
+      
+      return indices;
     }
 
     function updateFocusRing() {
@@ -1078,6 +2013,24 @@
       if (!focusRingRaf) focusRingRaf = requestAnimationFrame(tick);
     }
 
+    function showTeamToast(text) {
+      if (!linkToast) return;
+      linkToast.textContent = text;
+      linkToast.classList.add("active");
+      // Позиционируем по центру экрана
+      linkToast.style.left = "50%";
+      linkToast.style.top = "50%";
+      linkToast.style.transform = "translate(-50%, -50%)";
+      linkToast.style.position = "fixed";
+      linkToast.style.zIndex = "10000";
+      
+      if (linkToastTimer) window.clearTimeout(linkToastTimer);
+      linkToastTimer = window.setTimeout(() => {
+        linkToast.classList.remove("active");
+        linkToastTimer = null;
+      }, 1000); // Показываем 1 секунду
+    }
+    
     function showLinkToastAt(text, x, y) {
       if (!linkToast) return;
       linkToast.textContent = text;
@@ -1120,6 +2073,45 @@
         return 3.6;                  // 33+
       }
       
+      // Оптимизация: используем Map/кэш только для больших графов (>100 узлов)
+      // Для маленьких графов простая проверка быстрее
+      const useOptimization = state.nodes.length > 100;
+      
+      let nodeMapById = null;
+      let nodeColorCache = null;
+      
+      if (useOptimization) {
+        const nodeMapStart = performance.now();
+        nodeMapById = new Map(state.nodes.map((n) => [String(n.id), n]));
+        const nodeMapTime = performance.now() - nodeMapStart;
+        console.log(`[PERF] Node map creation: ${nodeMapTime.toFixed(2)}ms`);
+        
+        // Предвычисляем цвета узлов для кэширования (только если команда не выделена)
+        const nodeColorCacheStart = performance.now();
+        nodeColorCache = new Map();
+        if (!state.highlightedTeamId) {
+          // Кэшируем только если команда не выделена
+          for (const node of state.nodes) {
+            const id = String(node.id);
+            let color = colors.neutral;
+            if (node.status) {
+              color = node.status === "core" ? colors.core : colors.periphery;
+            } else if (node.status === null) {
+              // Явно окружение (status = null)
+              color = colors.environment;
+            } else {
+              // Проверяем teamMembers для полного графа
+              const status = state.teamMembers.get(id);
+              if (status === "core") color = colors.core;
+              else if (status === "periphery") color = colors.periphery;
+            }
+            nodeColorCache.set(id, color);
+          }
+        }
+        const nodeColorCacheTime = performance.now() - nodeColorCacheStart;
+        console.log(`[PERF] Node color cache: ${nodeColorCacheTime.toFixed(2)}ms`);
+      }
+      
       const config = {
         points: state.nodes,
         pointIdBy: "id",
@@ -1130,19 +2122,37 @@
         pointSizeRange: sizeRange,
         pointColorBy: "id",
         pointColorByFn: (id) => {
-          // Сначала проверяем статус из данных узла (для графа команды с окружением)
-          const node = state.nodes.find((n) => n.id === String(id));
-          if (node?.status) {
-            // Команда: зелёный для core, синий для periphery
-            if (node.status === "core") return colors.core;
-            if (node.status === "periphery") return colors.periphery;
+          const authorId = String(id);
+          
+          // Если команда выделена, используем статус автора в этой команде
+          if (state.highlightedTeamId) {
+            if (state.highlightedTeamMembers.has(authorId)) {
+              const status = state.highlightedTeamMembers.get(authorId);
+              if (status === "core") return colors.core;
+              if (status === "periphery") return colors.periphery;
+              // Если статус null или undefined, значит автор не в команде (окружение)
+              return colors.environment;
+            } else {
+              // Автор не в выделенной команде - это окружение, оранжевый цвет
+              return colors.environment;
+            }
           }
-          // Окружение: жёлтый цвет
-          if (node && !node.status) {
+          
+          // Иначе используем стандартную логику
+          if (useOptimization && nodeColorCache) {
+            // Используем кэш для больших графов
+            return nodeColorCache.get(authorId) || colors.neutral;
+          }
+          // Для маленьких графов - простая проверка без кэша
+          const node = state.nodes.find((n) => n.id === authorId);
+          if (!node) return colors.neutral;
+          if (node.status) {
+            return node.status === "core" ? colors.core : colors.periphery;
+          }
+          if (node.status === null) {
             return colors.environment;
           }
-          // Затем проверяем teamMembers (для подсветки в полном графе)
-          const status = state.teamMembers.get(String(id));
+          const status = state.teamMembers.get(authorId);
           if (status === "core") return colors.core;
           if (status === "periphery") return colors.periphery;
           return colors.neutral;
@@ -1153,25 +2163,88 @@
         linkSourceIndexBy: "sourceIndex",
         linkTargetIndexBy: "targetIndex",
         linkWidthBy: "weight",
-        linkWidthByFn: (value) => edgeWidthLevel(value) * state.edgeWidthScale,
+        linkWidthByFn: (value, link) => {
+          // Для рёбер-дубликатов делаем толще
+          if (link && link.type === "duplicate") {
+            return 8 * state.edgeWidthScale; // Толстое ребро для дубликатов
+          }
+          return edgeWidthLevel(value) * state.edgeWidthScale;
+        },
         linkWidthStrategy: "direct",
         linkColorBy: "pair",
-        linkColorByFn: (pair) => {
+        linkColorByFn: (pair, link) => {
           if (!pair) return colors.link;
           const [source, target] = String(pair).split("|");
-          const sourceNode = state.nodes.find((n) => n.id === source);
-          const targetNode = state.nodes.find((n) => n.id === target);
+          
+          // Если команда выделена, используем статусы авторов в этой команде
+          if (state.highlightedTeamId && state.highlightedTeamMembers.size > 0) {
+            const sourceInTeam = state.highlightedTeamMembers.has(source);
+            const targetInTeam = state.highlightedTeamMembers.has(target);
+            
+            // Если оба автора в выделенной команде - зелёный
+            if (sourceInTeam && targetInTeam) {
+              return colors.core;
+            }
+            // Если один в команде, другой в окружении - оранжевый
+            if ((sourceInTeam && !targetInTeam) || (!sourceInTeam && targetInTeam)) {
+              return colors.environment;
+            }
+            // Если оба в окружении - серый
+            return colors.link;
+          }
+          
+          // Иначе используем стандартную логику
+          if (link && link.type === "duplicate") {
+            // Получаем узлы для определения цветов команд
+            let sourceNode, targetNode;
+            if (useOptimization && nodeMapById) {
+              sourceNode = nodeMapById.get(source);
+              targetNode = nodeMapById.get(target);
+            } else {
+              sourceNode = state.nodes.find((n) => n.id === source);
+              targetNode = state.nodes.find((n) => n.id === target);
+            }
+            
+            if (sourceNode && targetNode) {
+              // Определяем цвета на основе статусов узлов
+              const sourceColor = sourceNode.status === "core" ? colors.core : 
+                                  sourceNode.status === "periphery" ? colors.periphery : colors.neutral;
+              const targetColor = targetNode.status === "core" ? colors.core : 
+                                 targetNode.status === "periphery" ? colors.periphery : colors.neutral;
+              
+              // Если цвета разные, используем промежуточный (оранжевый), иначе цвет узла
+              if (sourceColor !== targetColor) {
+                return "#ff6b35"; // Оранжевый для связи между разными командами
+              }
+              return sourceColor; // Цвет команды если оба узла из одной команды
+            }
+            return "#ff6b35"; // Оранжевый для дубликатов по умолчанию
+          }
+          
+          // Обычная логика для рёбер соавторства
+          let sourceNode, targetNode;
+          if (useOptimization && nodeMapById) {
+            // Используем Map для больших графов
+            sourceNode = nodeMapById.get(source);
+            targetNode = nodeMapById.get(target);
+          } else {
+            // Для маленьких графов - простой поиск
+            sourceNode = state.nodes.find((n) => n.id === source);
+            targetNode = state.nodes.find((n) => n.id === target);
+          }
+          
+          if (!sourceNode || !targetNode) return colors.link;
           
           // Если оба автора в команде (имеют status), зелёный цвет
-          if (sourceNode?.status && targetNode?.status) {
+          if (sourceNode.status && targetNode.status) {
             return colors.core;
           }
           // Если один в команде, другой в окружении, оранжевый
-          if ((sourceNode?.status && !targetNode?.status) || (!sourceNode?.status && targetNode?.status)) {
+          if ((sourceNode.status && !targetNode.status) || (!sourceNode.status && targetNode.status)) {
             return colors.environment;
           }
           // Если оба в окружении, серый
-          if (!sourceNode?.status && !targetNode?.status) {
+          if (!sourceNode.status && !targetNode.status) {
             return colors.link;
           }
           // Для полного графа (старая логика)
@@ -1181,6 +2254,10 @@
           return colors.link;
         },
         curvedLinks: true,
+        curvedLinkByFn: (link) => {
+          // Рёбра-дубликаты делаем прямыми для лучшей видимости
+          return link && link.type !== "duplicate";
+        },
         curvedLinkSegments: 19,
         curvedLinkWeight: 0.4,
         curvedLinkControlPointDistance: 0.45,
@@ -1199,9 +2276,17 @@
         focusPointOnLabelClick: false,
         onPointClick: (index) => {
           if (typeof index !== "number") return;
+          // Помечаем, что был клик на узел
+          if (window.wasPointOrLinkClick !== undefined) {
+            window.wasPointOrLinkClick = true;
+          }
           showNodeInfoByIndex(index);
         },
         onLinkClick: (linkIndex, event) => {
+          // Помечаем, что был клик на ребро
+          if (window.wasPointOrLinkClick !== undefined) {
+            window.wasPointOrLinkClick = true;
+          }
           const e = state.edges?.[linkIndex];
           if (!e) {
             showLinkToastAt(`Ребро #${linkIndex}`, event?.clientX ?? 12, event?.clientY ?? 12);
@@ -1224,10 +2309,56 @@
       };
 
       if (!state.graph) {
+        const createStart = performance.now();
         state.graph = new Cosmograph(container, config);
+        const createTime = performance.now() - createStart;
+        console.log(`[PERF] Cosmograph creation: ${createTime.toFixed(2)}ms`);
+        
         state.controls.fit = new CosmographButtonFitView(state.graph, document.getElementById("fitControl"));
         state.controls.zoom = new CosmographButtonZoomInOut(state.graph, document.getElementById("zoomControl"));
+        
+        // Обработчик клика на пустое поле графа для снятия выделения команды
+        // Используем глобальный флаг для отслеживания кликов на узлы/ребра
+        window.wasPointOrLinkClick = false;
+        
+        // Обработчик клика на контейнер
+        container.addEventListener("click", (e) => {
+          // Небольшая задержка, чтобы обработчики Cosmograph успели сработать
+          setTimeout(() => {
+            // Если клик был на пустом месте (не на узле/ребре), снимаем выделение команды
+            if (!window.wasPointOrLinkClick && state.highlightedTeamId) {
+              state.highlightedTeamId = null;
+              state.highlightedTeamMembers.clear();
+              // Скрываем индикатор выделенной команды
+              if (highlightedTeamIndicator) highlightedTeamIndicator.classList.add("hidden");
+              // Снимаем выделение со всех точек
+              if (state.graph && typeof state.graph.unselectAllPoints === "function") {
+                try {
+                  state.graph.unselectAllPoints();
+                } catch (err) {
+                  console.warn("[Teams Explorer] Failed to unselect all points:", err);
+                }
+              }
+              // Сбрасываем состояния кнопок
+              state.envRingsEnabled = false;
+              state.coreRingsEnabled = false;
+              state.peripheryRingsEnabled = false;
+              if (toggleEnvRingsBtn) toggleEnvRingsBtn.textContent = "Окружение";
+              if (toggleCoreRingsBtn) toggleCoreRingsBtn.textContent = "core";
+              if (togglePeripheryRingsBtn) togglePeripheryRingsBtn.textContent = "periphery";
+              // Пересчитываем цвета узлов и ребер (возвращаем к исходным)
+              void buildGraph();
+            }
+            // Сбрасываем флаг для следующего клика
+            window.wasPointOrLinkClick = false;
+          }, 100);
+        });
+        
+        const uploadStart = performance.now();
         await state.graph.dataUploaded();
+        const uploadTime = performance.now() - uploadStart;
+        console.log(`[PERF] Cosmograph data upload: ${uploadTime.toFixed(2)}ms`);
+        
         // When a graph is (re)created, simulation should be running by default.
         state.simulationPaused = false;
         try {
@@ -1253,9 +2384,17 @@
         // Keep `points`/`links` in config on every update to avoid Cosmograph dropping local tables.
         // When `points`/`links` references are unchanged, Cosmograph will update visual properties (e.g. colors)
         // without re-uploading data.
+        const setConfigStart = performance.now();
         await state.graph.setConfig(config);
+        const setConfigTime = performance.now() - setConfigStart;
+        console.log(`[PERF] Cosmograph setConfig: ${setConfigTime.toFixed(2)}ms`);
+        
         if (reloadData) {
+          const uploadStart = performance.now();
           await state.graph.dataUploaded();
+          const uploadTime = performance.now() - uploadStart;
+          console.log(`[PERF] Cosmograph data upload (reload): ${uploadTime.toFixed(2)}ms`);
+          
           // Switching team / reloading data should auto-start the simulation.
           state.simulationPaused = false;
           try {
@@ -1288,6 +2427,7 @@
 
     async function selectTeam(teamId) {
       state.selectedTeam = teamId;
+      state.selectedTeams = teamId ? [teamId] : [];
       renderTeams();
       if (!teamId) {
         // Если команда не выбрана, уничтожаем граф и показываем заглушку
@@ -1320,7 +2460,8 @@
       teamTitle.textContent = `Команда #${teamId}`;
       const data = await fetchJson(`/api/teams/${teamId}?period=${state.selectedPeriod}`);
       renderAuthors(data.authors || []);
-      renderPublications(data.publications || []);
+      // Рендерим список команд с публикациями
+      renderPublications([{ team_id: teamId }]);
       state.teamMembers = new Map();
       (data.authors || []).forEach((a) => state.teamMembers.set(String(a.id), a.status || "core"));
       // Загружаем граф команды вместо подсветки полного графа
@@ -1347,23 +2488,118 @@
       });
     }
 
-    function renderPublications(pubs) {
+    async function renderPublications(teamsData) {
+      // teamsData может быть массивом команд или массивом публикаций (для обратной совместимости)
       pubsList.innerHTML = "";
-      if (!pubs.length) {
-        pubsList.innerHTML = '<div class="empty">Нет публикаций</div>';
+      
+      // Если передан массив публикаций (старый формат), конвертируем в формат команд
+      if (teamsData && teamsData.length > 0 && teamsData[0].doc_id) {
+        // Это старый формат - массив публикаций
+        if (!teamsData.length) {
+          pubsList.innerHTML = '<div class="empty">Нет публикаций</div>';
+          return;
+        }
+        teamsData.forEach((p) => {
+          const item = document.createElement("div");
+          item.className = "pub-row";
+          const authors = (p.authors || []).map((a) => `<span class="chip ${a.status}">${fmtName(a)}</span>`).join(" ");
+          item.innerHTML = `
+            <div class="pub-authors">${authors}</div>
+            <div class="pub-title">${p.title || "Без названия"}</div>
+            <div class="small">${p.year || "—"}</div>
+          `;
+          item.addEventListener("click", () => showPublicationDetail(p.doc_id));
+          pubsList.appendChild(item);
+        });
         return;
       }
-      pubs.forEach((p) => {
-        const item = document.createElement("div");
-        item.className = "pub-row";
-        const authors = (p.authors || []).map((a) => `<span class="chip ${a.status}">${fmtName(a)}</span>`).join(" ");
-        item.innerHTML = `
-          <div class="pub-authors">${authors}</div>
-          <div class="pub-title">${p.title || "Без названия"}</div>
-          <div class="small">${p.year || "—"}</div>
+      
+      // Новый формат - массив команд
+      if (!teamsData || teamsData.length === 0) {
+        pubsList.innerHTML = '<div class="empty">Нет команд</div>';
+        return;
+      }
+      
+      // Для каждой команды: окошко с номером команды (с кнопкой развернуть) + список её публикаций
+      for (const teamData of teamsData) {
+        const teamId = teamData.team_id;
+        
+        // Контейнер для публикаций команды
+        const publicationsContainer = document.createElement("div");
+        publicationsContainer.className = "team-members-container";
+        
+        // Окошко с номером команды и кнопкой развернуть
+        const teamItem = document.createElement("div");
+        teamItem.className = "author-row team-header";
+        teamItem.innerHTML = `
+          <div class="row" style="justify-content: space-between; align-items: center;">
+            <div class="name" style="display: flex; align-items: center;">
+              <span class="toggle-icon">▼</span>
+              <span>Команда #${teamId}</span>
+            </div>
+          </div>
         `;
-        pubsList.appendChild(item);
-      });
+        
+        const toggleIconEl = teamItem.querySelector(".toggle-icon");
+        toggleIconEl.style.marginRight = "8px";
+        toggleIconEl.style.cursor = "pointer";
+        toggleIconEl.style.userSelect = "none";
+        
+        // Обработчик клика на иконку развернуть/свернуть
+        toggleIconEl.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const isExpanded = publicationsContainer.classList.contains("expanded");
+          
+          if (isExpanded) {
+            // Сворачиваем
+            publicationsContainer.classList.remove("expanded");
+            toggleIconEl.textContent = "▼";
+          } else {
+            // Разворачиваем - всегда загружаем публикации из API
+            publicationsContainer.innerHTML = '<div class="small" style="padding: 10px; text-align: center; color: var(--muted);">Загрузка...</div>';
+            
+            // Загружаем из API
+            let publications;
+            try {
+              const qs = new URLSearchParams({ period: state.selectedPeriod });
+              const data = await fetchJson(`/api/teams/${teamId}?${qs.toString()}`);
+              publications = data.publications || [];
+            } catch (error) {
+              console.error(`[Teams Explorer] Error loading publications for team ${teamId}:`, error);
+              publicationsContainer.innerHTML = '<div class="small" style="padding: 10px; text-align: center; color: #dc3545;">Ошибка загрузки</div>';
+              publicationsContainer.classList.add("expanded");
+              toggleIconEl.textContent = "▲";
+              return;
+            }
+            
+            // Очищаем контейнер и рендерим публикации
+            publicationsContainer.innerHTML = "";
+            
+            if (!publications || publications.length === 0) {
+              publicationsContainer.innerHTML = '<div class="empty">Нет публикаций</div>';
+            } else {
+              publications.forEach((p) => {
+                const item = document.createElement("div");
+                item.className = "pub-row";
+                const authors = (p.authors || []).map((a) => `<span class="chip ${a.status}">${fmtName(a)}</span>`).join(" ");
+                item.innerHTML = `
+                  <div class="pub-authors">${authors}</div>
+                  <div class="pub-title">${p.title || "Без названия"}</div>
+                  <div class="small">${p.year || "—"}</div>
+                `;
+                item.addEventListener("click", () => showPublicationDetail(p.doc_id));
+                publicationsContainer.appendChild(item);
+              });
+            }
+            
+            publicationsContainer.classList.add("expanded");
+            toggleIconEl.textContent = "▲";
+          }
+        });
+        
+        pubsList.appendChild(teamItem);
+        pubsList.appendChild(publicationsContainer);
+      }
     }
 
     function updateScales() {
@@ -1422,7 +2658,12 @@
 
     periodSelect.addEventListener("change", async () => {
       state.selectedPeriod = periodSelect.value;
-      await loadTeams();
+      // Очищаем список команд и выбранных авторов при изменении периода
+      state.teams = [];
+      state.selectedAuthors = [];
+      authorSearch.value = "";
+      renderSelectedAuthorsChips();
+      renderTeams();
       // IMPORTANT: do not rebuild/reload the full graph on period change.
       // The graph will update only when the user selects a team (team graph) or explicitly resets to full graph elsewhere.
       teamTitle.textContent = "–";
@@ -1430,12 +2671,47 @@
       pubsList.innerHTML = "";
       state.teamMembers.clear();
       state.selectedTeam = null;
+    });
+
+    sortSelect.addEventListener("change", () => {
+      state.sortOrder = sortSelect.value;
+      console.log("[DEBUG] Sort order:", state.sortOrder);
+      if (state.sortOrder === "period_desc" || state.sortOrder === "period_asc") {
+        // Отладка: проверяем значения периода для первых 5 команд
+        state.teams.slice(0, 5).forEach(team => {
+          const periodValue = team.period 
+            ? (() => {
+                const [start, end] = team.period.split("-").map(Number);
+                return end - start;
+              })()
+            : (team.periods ? team.periods.split(",").map(p => p.trim()).filter(p => p).length : 0);
+          console.log(`[DEBUG] Team ${team.team_id}: period="${team.period || team.periods || 'none'}", value=${periodValue}`);
+        });
+      }
       renderTeams();
     });
 
-    searchBtn.addEventListener("click", loadTeams);
+    searchBtn.addEventListener("click", () => {
+      const query = authorSearch.value.trim();
+      if (query) {
+        // Добавляем автора в список, если его ещё нет
+        if (!state.selectedAuthors.includes(query)) {
+          state.selectedAuthors.push(query);
+          renderSelectedAuthorsChips();
+        }
+        authorSearch.value = ""; // Очищаем поле ввода
+        loadTeams();
+      } else {
+        // Если поле пустое и список авторов пуст, загружаем все команды периода
+        if (state.selectedAuthors.length === 0) {
+          loadTeams();
+        }
+      }
+    });
     clearSearchBtn.addEventListener("click", async () => {
       authorSearch.value = "";
+      state.selectedAuthors = [];
+      renderSelectedAuthorsChips();
       await loadTeams();
       state.teamMembers.clear();
       state.selectedTeam = null;
@@ -1468,7 +2744,23 @@
       authorSearch.focus();
     });
     authorSearch.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") loadTeams();
+      if (e.key === "Enter") {
+        const query = authorSearch.value.trim();
+        if (query) {
+          // Добавляем автора в список, если его ещё нет
+          if (!state.selectedAuthors.includes(query)) {
+            state.selectedAuthors.push(query);
+            renderSelectedAuthorsChips();
+          }
+          authorSearch.value = ""; // Очищаем поле ввода
+          loadTeams();
+        } else {
+          // Если поле пустое и список авторов пуст, загружаем все команды периода
+          if (state.selectedAuthors.length === 0) {
+            loadTeams();
+          }
+        }
+      }
       if (e.key === "Escape") clearSearchBtn.click();
     });
 
@@ -1495,27 +2787,270 @@
 
     hideNodeInfoBtn.addEventListener("click", () => toggleNodeInfo(false));
 
+    closePublicationModal.addEventListener("click", () => togglePublicationModal(false));
+    publicationModal.addEventListener("click", (e) => {
+      if (e.target === publicationModal) togglePublicationModal(false);
+    });
+
     toggleEnvRingsBtn.addEventListener("click", () => {
-      state.envRingsEnabled = !state.envRingsEnabled;
-      toggleEnvRingsBtn.textContent = state.envRingsEnabled ? "Окружение: выкл" : "Окружение";
-      updateFocusRing();
+      // Проверяем режим: несколько команд или одна команда
+      const isMultipleTeamsMode = state.selectedTeams.length > 1;
+      
+      if (isMultipleTeamsMode) {
+        // Режим нескольких команд: работаем только для выделенной команды
+        if (!state.highlightedTeamId) {
+          showTeamToast("Сначала выделите команду");
+          return;
+        }
+        
+        state.envRingsEnabled = !state.envRingsEnabled;
+        toggleEnvRingsBtn.textContent = state.envRingsEnabled ? "Окружение ✓" : "Окружение";
+        
+        // Обновляем индексы для отрисовки колец
+        state.envRingIndices = getTeamRoleIndices(state.highlightedTeamId, null); // null = окружение
+        
+        // Вызываем updateFocusRing для отрисовки колец
+        updateFocusRing();
+        
+        // Также используем Cosmograph selection для визуального выделения
+        if (state.envRingsEnabled && state.envRingIndices.length > 0 && state.graph && typeof state.graph.selectPoints === "function") {
+          try {
+            state.graph.selectPoints(state.envRingIndices, true); // true = add to selection
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to select env points:", e);
+          }
+        } else if (!state.envRingsEnabled && state.envRingIndices.length > 0 && state.graph && typeof state.graph.unselectPointsByIndicies === "function") {
+          try {
+            state.graph.unselectPointsByIndicies(state.envRingIndices);
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to unselect env points:", e);
+          }
+        }
+      } else {
+        // Режим одной команды: стандартное поведение
+        state.envRingsEnabled = !state.envRingsEnabled;
+        toggleEnvRingsBtn.textContent = state.envRingsEnabled ? "Окружение: выкл" : "Окружение";
+        updateFocusRing();
+      }
     });
 
     toggleCoreRingsBtn.addEventListener("click", () => {
-      state.coreRingsEnabled = !state.coreRingsEnabled;
-      toggleCoreRingsBtn.textContent = state.coreRingsEnabled ? "core: выкл" : "core";
-      updateFocusRing();
+      // Проверяем режим: несколько команд или одна команда
+      const isMultipleTeamsMode = state.selectedTeams.length > 1;
+      
+      if (isMultipleTeamsMode) {
+        // Режим нескольких команд: работаем только для выделенной команды
+        if (!state.highlightedTeamId) {
+          showTeamToast("Сначала выделите команду");
+          return;
+        }
+        
+        state.coreRingsEnabled = !state.coreRingsEnabled;
+        toggleCoreRingsBtn.textContent = state.coreRingsEnabled ? "core ✓" : "core";
+        
+        // Обновляем индексы для отрисовки колец
+        state.coreRingIndices = getTeamRoleIndices(state.highlightedTeamId, "core");
+        
+        // Вызываем updateFocusRing для отрисовки колец
+        updateFocusRing();
+        
+        // Также используем Cosmograph selection для визуального выделения
+        if (state.coreRingsEnabled && state.coreRingIndices.length > 0 && state.graph && typeof state.graph.selectPoints === "function") {
+          try {
+            state.graph.selectPoints(state.coreRingIndices, true); // true = add to selection
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to select core points:", e);
+          }
+        } else if (!state.coreRingsEnabled && state.coreRingIndices.length > 0 && state.graph && typeof state.graph.unselectPointsByIndicies === "function") {
+          try {
+            state.graph.unselectPointsByIndicies(state.coreRingIndices);
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to unselect core points:", e);
+          }
+        }
+      } else {
+        // Режим одной команды: стандартное поведение
+        state.coreRingsEnabled = !state.coreRingsEnabled;
+        toggleCoreRingsBtn.textContent = state.coreRingsEnabled ? "core: выкл" : "core";
+        updateFocusRing();
+      }
     });
 
+    // Обработчики для кнопок режима нескольких команд (отладка)
+    if (toggleEnvRingsMultiBtn) {
+      toggleEnvRingsMultiBtn.addEventListener("click", () => {
+        if (!state.highlightedTeamId) {
+          showTeamToast("Сначала выделите команду");
+          return;
+        }
+        
+        state.envRingsEnabled = !state.envRingsEnabled;
+        toggleEnvRingsMultiBtn.textContent = state.envRingsEnabled ? "Окружение ✓" : "Окружение";
+        
+        // Обновляем индексы для отрисовки колец
+        state.envRingIndices = getTeamRoleIndices(state.highlightedTeamId, null); // null = окружение
+        
+        console.log("[DEBUG] Env indices for team", state.highlightedTeamId, ":", state.envRingIndices);
+        
+        // Вызываем updateFocusRing для отрисовки колец
+        updateFocusRing();
+        
+        // Также используем Cosmograph selection для визуального выделения
+        if (state.envRingsEnabled && state.envRingIndices.length > 0 && state.graph && typeof state.graph.selectPoints === "function") {
+          try {
+            state.graph.selectPoints(state.envRingIndices, true);
+            console.log("[DEBUG] Selected", state.envRingIndices.length, "env points");
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to select env points:", e);
+          }
+        } else if (!state.envRingsEnabled && state.envRingIndices.length > 0 && state.graph && typeof state.graph.unselectPointsByIndicies === "function") {
+          try {
+            state.graph.unselectPointsByIndicies(state.envRingIndices);
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to unselect env points:", e);
+          }
+        }
+      });
+    }
+
+    if (toggleCoreRingsMultiBtn) {
+      toggleCoreRingsMultiBtn.addEventListener("click", () => {
+        if (!state.highlightedTeamId) {
+          showTeamToast("Сначала выделите команду");
+          return;
+        }
+        
+        state.coreRingsEnabled = !state.coreRingsEnabled;
+        toggleCoreRingsMultiBtn.textContent = state.coreRingsEnabled ? "core ✓" : "core";
+        
+        // Обновляем индексы для отрисовки колец
+        state.coreRingIndices = getTeamRoleIndices(state.highlightedTeamId, "core");
+        
+        console.log("[DEBUG] Core indices for team", state.highlightedTeamId, ":", state.coreRingIndices);
+        
+        // Вызываем updateFocusRing для отрисовки колец
+        updateFocusRing();
+        
+        // Также используем Cosmograph selection для визуального выделения
+        if (state.coreRingsEnabled && state.coreRingIndices.length > 0 && state.graph && typeof state.graph.selectPoints === "function") {
+          try {
+            state.graph.selectPoints(state.coreRingIndices, true);
+            console.log("[DEBUG] Selected", state.coreRingIndices.length, "core points");
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to select core points:", e);
+          }
+        } else if (!state.coreRingsEnabled && state.coreRingIndices.length > 0 && state.graph && typeof state.graph.unselectPointsByIndicies === "function") {
+          try {
+            state.graph.unselectPointsByIndicies(state.coreRingIndices);
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to unselect core points:", e);
+          }
+        }
+      });
+    }
+
+    if (togglePeripheryRingsMultiBtn) {
+      togglePeripheryRingsMultiBtn.addEventListener("click", () => {
+        if (!state.highlightedTeamId) {
+          showTeamToast("Сначала выделите команду");
+          return;
+        }
+        
+        state.peripheryRingsEnabled = !state.peripheryRingsEnabled;
+        togglePeripheryRingsMultiBtn.textContent = state.peripheryRingsEnabled ? "periphery ✓" : "periphery";
+        
+        // Обновляем индексы для отрисовки колец
+        state.peripheryRingIndices = getTeamRoleIndices(state.highlightedTeamId, "periphery");
+        
+        console.log("[DEBUG] Periphery indices for team", state.highlightedTeamId, ":", state.peripheryRingIndices);
+        
+        // Вызываем updateFocusRing для отрисовки колец
+        updateFocusRing();
+        
+        // Также используем Cosmograph selection для визуального выделения
+        if (state.peripheryRingsEnabled && state.peripheryRingIndices.length > 0 && state.graph && typeof state.graph.selectPoints === "function") {
+          try {
+            state.graph.selectPoints(state.peripheryRingIndices, true);
+            console.log("[DEBUG] Selected", state.peripheryRingIndices.length, "periphery points");
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to select periphery points:", e);
+          }
+        } else if (!state.peripheryRingsEnabled && state.peripheryRingIndices.length > 0 && state.graph && typeof state.graph.unselectPointsByIndicies === "function") {
+          try {
+            state.graph.unselectPointsByIndicies(state.peripheryRingIndices);
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to unselect periphery points:", e);
+          }
+        }
+      });
+    }
+
     togglePeripheryRingsBtn.addEventListener("click", () => {
-      state.peripheryRingsEnabled = !state.peripheryRingsEnabled;
-      togglePeripheryRingsBtn.textContent = state.peripheryRingsEnabled ? "periphery: выкл" : "periphery";
-      updateFocusRing();
+      // Проверяем режим: несколько команд или одна команда
+      const isMultipleTeamsMode = state.selectedTeams.length > 1;
+      
+      if (isMultipleTeamsMode) {
+        // Режим нескольких команд: работаем только для выделенной команды
+        if (!state.highlightedTeamId) {
+          showTeamToast("Сначала выделите команду");
+          return;
+        }
+        
+        state.peripheryRingsEnabled = !state.peripheryRingsEnabled;
+        togglePeripheryRingsBtn.textContent = state.peripheryRingsEnabled ? "periphery ✓" : "periphery";
+        
+        // Обновляем индексы для отрисовки колец
+        state.peripheryRingIndices = getTeamRoleIndices(state.highlightedTeamId, "periphery");
+        
+        // Вызываем updateFocusRing для отрисовки колец
+        updateFocusRing();
+        
+        // Также используем Cosmograph selection для визуального выделения
+        if (state.peripheryRingsEnabled && state.peripheryRingIndices.length > 0 && state.graph && typeof state.graph.selectPoints === "function") {
+          try {
+            state.graph.selectPoints(state.peripheryRingIndices, true); // true = add to selection
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to select periphery points:", e);
+          }
+        } else if (!state.peripheryRingsEnabled && state.peripheryRingIndices.length > 0 && state.graph && typeof state.graph.unselectPointsByIndicies === "function") {
+          try {
+            state.graph.unselectPointsByIndicies(state.peripheryRingIndices);
+          } catch (e) {
+            console.warn("[Teams Explorer] Failed to unselect periphery points:", e);
+          }
+        }
+      } else {
+        // Режим одной команды: стандартное поведение
+        state.peripheryRingsEnabled = !state.peripheryRingsEnabled;
+        togglePeripheryRingsBtn.textContent = state.peripheryRingsEnabled ? "periphery: выкл" : "periphery";
+        updateFocusRing();
+      }
     });
+
+    // Обработчики для поиска авторов
+    if (searchAuthorBtn) {
+      searchAuthorBtn.addEventListener("click", () => {
+        const query = authorSearchInGraph?.value || "";
+        searchAuthorInGraph(query);
+      });
+    }
+    
+    if (authorSearchInGraph) {
+      authorSearchInGraph.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+          const query = authorSearchInGraph.value || "";
+          searchAuthorInGraph(query);
+        }
+      });
+      
+    }
 
     (async function init() {
       await loadPeriods();
-      await loadTeams();
+      // Не загружаем команды автоматически при инициализации
+      // Команды будут загружены только при нажатии кнопки "Найти" с пустым списком авторов
+      state.teams = [];
+      renderTeams();
       settingInputs.includeSinglePub.checked = state.includeSinglePub;
       showPlaceholder();
       syncPlayPauseButton();
