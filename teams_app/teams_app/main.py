@@ -88,16 +88,21 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 async def get_periods() -> JSONResponse:
     with connect() as con:
         rows = con.execute("SELECT DISTINCT period FROM teams ORDER BY period").fetchall()
-    return JSONResponse({"periods": [row[0] for row in rows]})
+    periods = [row[0] for row in rows]
+    # Добавляем специальный период "2019-2025" для объединения всех периодов
+    periods.append("2019-2025")
+    return JSONResponse({"periods": periods})
 
 
 @app.get("/api/teams")
 async def list_teams(
-    period: str = Query(..., description="Sliding window period, e.g. 2023-2025"),
+    period: str = Query(..., description="Sliding window period, e.g. 2023-2025, or '2019-2025' for all periods"),
     query: str | None = Query(None, description="Filter teams by author name (deprecated, use authors)"),
     authors: list[str] = Query(default=[], description="Filter teams by multiple author names (all must be in team)"),
 ) -> JSONResponse:
-    _, _ = parse_period(period)
+    is_all_periods = period == "2019-2025"
+    if not is_all_periods:
+        _, _ = parse_period(period)
     
     # Поддержка обратной совместимости: если передан query, используем его
     author_queries = []
@@ -111,34 +116,93 @@ async def list_teams(
         # Для каждого автора проверяем, что он есть в команде
         author_conditions = []
         for i, author_query in enumerate(author_queries):
-            author_conditions.append(f"""
-                EXISTS (
-                    SELECT 1
-                    FROM team_members tm{i}
-                    JOIN authors a{i} ON a{i}.id = tm{i}.author_id
-                    WHERE tm{i}.team_id = ts.team_id
-                        AND tm{i}.period = ts.period
-                        AND LOWER(a{i}.lastname || ' ' || COALESCE(a{i}.givenname, '')) LIKE ?
-                )
-            """)
+            if is_all_periods:
+                # Для всех периодов не фильтруем по периоду, используем таблицу teams напрямую
+                author_conditions.append(f"""
+                    EXISTS (
+                        SELECT 1
+                        FROM teams tm{i}
+                        JOIN authors a{i} ON a{i}.id = tm{i}.author_id
+                        WHERE tm{i}.team_id = ts.team_id
+                            AND LOWER(a{i}.lastname || ' ' || COALESCE(a{i}.givenname, '')) LIKE ?
+                    )
+                """)
+            else:
+                author_conditions.append(f"""
+                    EXISTS (
+                        SELECT 1
+                        FROM team_members tm{i}
+                        JOIN authors a{i} ON a{i}.id = tm{i}.author_id
+                        WHERE tm{i}.team_id = ts.team_id
+                            AND tm{i}.period = ts.period
+                            AND LOWER(a{i}.lastname || ' ' || COALESCE(a{i}.givenname, '')) LIKE ?
+                    )
+                """)
         
         filter_condition = " AND ".join(author_conditions)
     else:
         filter_condition = "1=1"  # Нет фильтрации
     
-    sql = f"""
-        WITH team_members AS (
-            SELECT period, team_id, author_id, status
-            FROM teams
-            WHERE period = ?
-        ),
-        team_stats AS (
+    if is_all_periods:
+        # SQL для всех периодов: убираем фильтр по периоду, группируем только по team_id
+        sql = f"""
+            WITH team_members AS (
+                SELECT team_id, author_id, status
+                FROM teams
+            ),
+            team_stats AS (
+                SELECT
+                    team_id,
+                    COUNT(DISTINCT author_id) AS authors_count,
+                    SUM(CASE WHEN status = 'core' THEN 1 ELSE 0 END) AS core_count,
+                    SUM(CASE WHEN status = 'periphery' THEN 1 ELSE 0 END) AS periphery_count
+                FROM team_members
+                GROUP BY team_id
+            ),
+            filtered_teams AS (
+                SELECT ts.*
+                FROM team_stats ts
+                WHERE {filter_condition}
+            )
             SELECT
-                period,
-                team_id,
-                COUNT(*) AS authors_count,
-                SUM(CASE WHEN status = 'core' THEN 1 ELSE 0 END) AS core_count,
-                SUM(CASE WHEN status = 'periphery' THEN 1 ELSE 0 END) AS periphery_count
+                ft.team_id,
+                ft.authors_count,
+                ft.core_count,
+                ft.periphery_count,
+                COALESCE(
+                    string_agg(
+                        DISTINCT a.lastname || ' ' || COALESCE(a.givenname, ''),
+                        ', '
+                    ),
+                    ''
+                ) AS sample_authors
+            FROM filtered_teams ft
+            LEFT JOIN LATERAL (
+                SELECT DISTINCT a.lastname, a.givenname
+                FROM teams tm
+                JOIN authors a ON a.id = tm.author_id
+                WHERE tm.team_id = ft.team_id
+                ORDER BY (tm.status = 'periphery'), a.lastname
+                LIMIT 3
+            ) a ON true
+            GROUP BY ft.team_id, ft.authors_count, ft.core_count, ft.periphery_count
+            ORDER BY ft.team_id
+        """
+        params: list[Any] = []
+    else:
+        sql = f"""
+            WITH team_members AS (
+                SELECT period, team_id, author_id, status
+                FROM teams
+                WHERE period = ?
+            ),
+            team_stats AS (
+                SELECT
+                    period,
+                    team_id,
+                    COUNT(*) AS authors_count,
+                    SUM(CASE WHEN status = 'core' THEN 1 ELSE 0 END) AS core_count,
+                    SUM(CASE WHEN status = 'periphery' THEN 1 ELSE 0 END) AS periphery_count
             FROM team_members
             GROUP BY period, team_id
         ),
@@ -170,11 +234,12 @@ async def list_teams(
         ) a ON true
         GROUP BY ft.team_id, ft.authors_count, ft.core_count, ft.periphery_count
         ORDER BY ft.team_id
-    """
-    # Параметры: period + все author_queries (каждый для EXISTS условия)
-    params: list[Any] = [period]
+        """
+        params: list[Any] = [period]
+    
+    # Добавляем параметры для фильтрации по авторам (если есть)
+    # Каждый EXISTS подзапрос использует один параметр для LIKE условия
     if author_queries:
-        # Для каждого автора добавляем параметр в EXISTS условие
         params.extend(author_queries)
     
     with connect() as con:
@@ -384,27 +449,58 @@ async def get_graph(
 @app.get("/api/teams/{team_id}")
 async def get_team_detail(
     team_id: int,
-    period: str = Query(..., description="Sliding window period for the team"),
+    period: str = Query(..., description="Sliding window period for the team, or '2019-2025' for all periods"),
 ) -> JSONResponse:
-    start_year, end_year = parse_period(period)
-    authors_sql = """
-        SELECT a.id, a.lastname, a.givenname, t.status
-        FROM teams t
-        JOIN authors a ON a.id = t.author_id
-        WHERE t.period = ? AND t.team_id = ?
-        ORDER BY (t.status = 'periphery'), a.lastname
+    is_all_periods = period == "2019-2025"
+    if is_all_periods:
+        start_year, end_year = 2019, 2025
+    else:
+        start_year, end_year = parse_period(period)
+    
+    if is_all_periods:
+        # Для всех периодов: убираем фильтр по периоду, используем DISTINCT для статусов
+        authors_sql = """
+            SELECT DISTINCT a.id, a.lastname, a.givenname, 
+                   MAX(CASE WHEN t.status = 'core' THEN 'core' ELSE 'periphery' END) AS status
+            FROM teams t
+            JOIN authors a ON a.id = t.author_id
+            WHERE t.team_id = ?
+            GROUP BY a.id, a.lastname, a.givenname
+            ORDER BY (MAX(CASE WHEN t.status = 'core' THEN 0 ELSE 1 END)), a.lastname
+        """
+        publications_sql = """
+            WITH period_docs AS (
+                SELECT eid, title, year
+                FROM docs
+                WHERE year BETWEEN ? AND ?
+            ),
+            team_members AS (
+                SELECT DISTINCT author_id, 
+                       MAX(CASE WHEN status = 'core' THEN 'core' ELSE 'periphery' END) AS status
+                FROM teams
+                WHERE team_id = ?
+                GROUP BY author_id
+            ),
     """
-    publications_sql = """
-        WITH period_docs AS (
-            SELECT eid, title, year
-            FROM docs
-            WHERE year BETWEEN ? AND ?
-        ),
-        team_members AS (
-            SELECT author_id, status
-            FROM teams
-            WHERE period = ? AND team_id = ?
-        ),
+    else:
+        authors_sql = """
+            SELECT a.id, a.lastname, a.givenname, t.status
+            FROM teams t
+            JOIN authors a ON a.id = t.author_id
+            WHERE t.period = ? AND t.team_id = ?
+            ORDER BY (t.status = 'periphery'), a.lastname
+        """
+        publications_sql = """
+            WITH period_docs AS (
+                SELECT eid, title, year
+                FROM docs
+                WHERE year BETWEEN ? AND ?
+            ),
+            team_members AS (
+                SELECT author_id, status
+                FROM teams
+                WHERE period = ? AND team_id = ?
+            ),
         doc_authors AS (
             SELECT
                 d.eid AS doc_id,
@@ -431,8 +527,12 @@ async def get_team_detail(
         ORDER BY year DESC, doc_id, auth_seqn;
     """
     with connect() as con:
-        author_rows = con.execute(authors_sql, [period, team_id]).fetchall()
-        doc_rows = con.execute(publications_sql, [start_year, end_year, period, team_id]).fetchall()
+        if is_all_periods:
+            author_rows = con.execute(authors_sql, [team_id]).fetchall()
+            doc_rows = con.execute(publications_sql, [start_year, end_year, team_id]).fetchall()
+        else:
+            author_rows = con.execute(authors_sql, [period, team_id]).fetchall()
+            doc_rows = con.execute(publications_sql, [start_year, end_year, period, team_id]).fetchall()
 
     authors = [
         {
@@ -562,7 +662,11 @@ async def get_multiple_teams_graph(
             raise HTTPException(status_code=400, detail="At least one team_id required")
         
         logger.info(f"[PERF] Loading graph for teams {team_id_list}, period {period}")
-        start_year, end_year = parse_period(period)
+        is_all_periods = period == "2019-2025"
+        if is_all_periods:
+            start_year, end_year = 2019, 2025
+        else:
+            start_year, end_year = parse_period(period)
         
         # Получаем данные для каждой команды
         all_nodes = {}  # {node_id: node_data}
@@ -571,110 +675,220 @@ async def get_multiple_teams_graph(
         
         for team_id in team_id_list:
             # SQL для получения узлов команды
-            nodes_sql = """
-                WITH team_members AS (
-                    SELECT author_id, status
-                    FROM teams
-                    WHERE period = ? AND team_id = ?
-                ),
-                period_docs AS (
-                    SELECT eid, year
-                    FROM docs
-                    WHERE year BETWEEN ? AND ?
-                ),
-                team_docs AS (
-                    SELECT DISTINCT d.eid AS doc_id
-                    FROM period_docs d
-                    JOIN auth_doc ad ON ad.doc_id = d.eid
-                    JOIN team_members tm ON tm.author_id = ad.auth_id
-                ),
-                doc_authors_raw AS (
-                    SELECT DISTINCT td.doc_id, ad.auth_id
-                    FROM team_docs td
-                    JOIN auth_doc ad ON ad.doc_id = td.doc_id
-                ),
-                doc_author_counts AS (
-                    SELECT doc_id, COUNT(*) AS k
-                    FROM doc_authors_raw
-                    GROUP BY doc_id
-                ),
-                doc_authors AS (
-                    SELECT dar.doc_id, dar.auth_id
-                    FROM doc_authors_raw dar
-                    JOIN doc_author_counts dac USING (doc_id)
-                    WHERE (? = 0 OR dac.k <= ?)
-                ),
-                node_stats AS (
-                    SELECT 
-                        da.auth_id,
-                        COUNT(DISTINCT da.doc_id) AS pubs,
-                        MAX(tm.status) AS status
-                    FROM doc_authors da
-                    LEFT JOIN team_members tm ON tm.author_id = da.auth_id
-                    GROUP BY da.auth_id
-                )
-                SELECT
-                    ns.auth_id,
-                    a.lastname,
-                    a.givenname,
-                    ns.pubs,
-                    ns.status
-                FROM node_stats ns
-                LEFT JOIN authors a ON a.id = ns.auth_id
-                ORDER BY ns.status IS NULL, ns.pubs DESC;
-            """
+            if is_all_periods:
+                nodes_sql = """
+                    WITH team_members AS (
+                        SELECT DISTINCT author_id, 
+                               MAX(CASE WHEN status = 'core' THEN 'core' ELSE 'periphery' END) AS status
+                        FROM teams
+                        WHERE team_id = ?
+                        GROUP BY author_id
+                    ),
+                    period_docs AS (
+                        SELECT eid, year
+                        FROM docs
+                        WHERE year BETWEEN ? AND ?
+                    ),
+                    team_docs AS (
+                        SELECT DISTINCT d.eid AS doc_id
+                        FROM period_docs d
+                        JOIN auth_doc ad ON ad.doc_id = d.eid
+                        JOIN team_members tm ON tm.author_id = ad.auth_id
+                    ),
+                    doc_authors_raw AS (
+                        SELECT DISTINCT td.doc_id, ad.auth_id
+                        FROM team_docs td
+                        JOIN auth_doc ad ON ad.doc_id = td.doc_id
+                    ),
+                    doc_author_counts AS (
+                        SELECT doc_id, COUNT(*) AS k
+                        FROM doc_authors_raw
+                        GROUP BY doc_id
+                    ),
+                    doc_authors AS (
+                        SELECT dar.doc_id, dar.auth_id
+                        FROM doc_authors_raw dar
+                        JOIN doc_author_counts dac USING (doc_id)
+                        WHERE (? = 0 OR dac.k <= ?)
+                    ),
+                    node_stats AS (
+                        SELECT 
+                            da.auth_id,
+                            COUNT(DISTINCT da.doc_id) AS pubs,
+                            MAX(tm.status) AS status
+                        FROM doc_authors da
+                        LEFT JOIN team_members tm ON tm.author_id = da.auth_id
+                        GROUP BY da.auth_id
+                    )
+                    SELECT
+                        ns.auth_id,
+                        a.lastname,
+                        a.givenname,
+                        ns.pubs,
+                        ns.status
+                    FROM node_stats ns
+                    LEFT JOIN authors a ON a.id = ns.auth_id
+                    ORDER BY ns.status IS NULL, ns.pubs DESC;
+                """
+            else:
+                nodes_sql = """
+                    WITH team_members AS (
+                        SELECT author_id, status
+                        FROM teams
+                        WHERE period = ? AND team_id = ?
+                    ),
+                    period_docs AS (
+                        SELECT eid, year
+                        FROM docs
+                        WHERE year BETWEEN ? AND ?
+                    ),
+                    team_docs AS (
+                        SELECT DISTINCT d.eid AS doc_id
+                        FROM period_docs d
+                        JOIN auth_doc ad ON ad.doc_id = d.eid
+                        JOIN team_members tm ON tm.author_id = ad.auth_id
+                    ),
+                    doc_authors_raw AS (
+                        SELECT DISTINCT td.doc_id, ad.auth_id
+                        FROM team_docs td
+                        JOIN auth_doc ad ON ad.doc_id = td.doc_id
+                    ),
+                    doc_author_counts AS (
+                        SELECT doc_id, COUNT(*) AS k
+                        FROM doc_authors_raw
+                        GROUP BY doc_id
+                    ),
+                    doc_authors AS (
+                        SELECT dar.doc_id, dar.auth_id
+                        FROM doc_authors_raw dar
+                        JOIN doc_author_counts dac USING (doc_id)
+                        WHERE (? = 0 OR dac.k <= ?)
+                    ),
+                    node_stats AS (
+                        SELECT 
+                            da.auth_id,
+                            COUNT(DISTINCT da.doc_id) AS pubs,
+                            MAX(tm.status) AS status
+                        FROM doc_authors da
+                        LEFT JOIN team_members tm ON tm.author_id = da.auth_id
+                        GROUP BY da.auth_id
+                    )
+                    SELECT
+                        ns.auth_id,
+                        a.lastname,
+                        a.givenname,
+                        ns.pubs,
+                        ns.status
+                    FROM node_stats ns
+                    LEFT JOIN authors a ON a.id = ns.auth_id
+                    ORDER BY ns.status IS NULL, ns.pubs DESC;
+                """
             
             # SQL для получения рёбер команды
-            edges_sql = """
-                WITH team_members AS (
-                    SELECT author_id, status
-                    FROM teams
-                    WHERE period = ? AND team_id = ?
-                ),
-                period_docs AS (
-                    SELECT eid, year
-                    FROM docs
-                    WHERE year BETWEEN ? AND ?
-                ),
-                team_docs AS (
-                    SELECT DISTINCT d.eid AS doc_id
-                    FROM period_docs d
-                    JOIN auth_doc ad ON ad.doc_id = d.eid
-                    JOIN team_members tm ON tm.author_id = ad.auth_id
-                ),
-                doc_authors_raw AS (
-                    SELECT DISTINCT td.doc_id, ad.auth_id
-                    FROM team_docs td
-                    JOIN auth_doc ad ON ad.doc_id = td.doc_id
-                ),
-                doc_author_counts AS (
-                    SELECT doc_id, COUNT(*) AS k
-                    FROM doc_authors_raw
-                    GROUP BY doc_id
-                ),
-                doc_authors AS (
-                    SELECT dar.doc_id, dar.auth_id
-                    FROM doc_authors_raw dar
-                    JOIN doc_author_counts dac USING (doc_id)
-                    WHERE (? = 0 OR dac.k <= ?)
-                )
-                SELECT
-                    LEAST(a1.auth_id, a2.auth_id) AS source,
-                    GREATEST(a1.auth_id, a2.auth_id) AS target,
-                    COUNT(DISTINCT a1.doc_id) AS weight
-                FROM doc_authors a1
-                JOIN doc_authors a2
-                    ON a1.doc_id = a2.doc_id AND a1.auth_id < a2.auth_id
-                GROUP BY source, target;
-            """
+            if is_all_periods:
+                edges_sql = """
+                    WITH team_members AS (
+                        SELECT DISTINCT author_id, 
+                               MAX(CASE WHEN status = 'core' THEN 'core' ELSE 'periphery' END) AS status
+                        FROM teams
+                        WHERE team_id = ?
+                        GROUP BY author_id
+                    ),
+                    period_docs AS (
+                        SELECT eid, year
+                        FROM docs
+                        WHERE year BETWEEN ? AND ?
+                    ),
+                    team_docs AS (
+                        SELECT DISTINCT d.eid AS doc_id
+                        FROM period_docs d
+                        JOIN auth_doc ad ON ad.doc_id = d.eid
+                        JOIN team_members tm ON tm.author_id = ad.auth_id
+                    ),
+                    doc_authors_raw AS (
+                        SELECT DISTINCT td.doc_id, ad.auth_id
+                        FROM team_docs td
+                        JOIN auth_doc ad ON ad.doc_id = td.doc_id
+                    ),
+                    doc_author_counts AS (
+                        SELECT doc_id, COUNT(*) AS k
+                        FROM doc_authors_raw
+                        GROUP BY doc_id
+                    ),
+                    doc_authors AS (
+                        SELECT dar.doc_id, dar.auth_id
+                        FROM doc_authors_raw dar
+                        JOIN doc_author_counts dac USING (doc_id)
+                        WHERE (? = 0 OR dac.k <= ?)
+                    )
+                    SELECT
+                        LEAST(a1.auth_id, a2.auth_id) AS source,
+                        GREATEST(a1.auth_id, a2.auth_id) AS target,
+                        COUNT(DISTINCT a1.doc_id) AS weight
+                    FROM doc_authors a1
+                    JOIN doc_authors a2
+                        ON a1.doc_id = a2.doc_id AND a1.auth_id < a2.auth_id
+                    GROUP BY source, target;
+                """
+            else:
+                edges_sql = """
+                    WITH team_members AS (
+                        SELECT author_id, status
+                        FROM teams
+                        WHERE period = ? AND team_id = ?
+                    ),
+                    period_docs AS (
+                        SELECT eid, year
+                        FROM docs
+                        WHERE year BETWEEN ? AND ?
+                    ),
+                    team_docs AS (
+                        SELECT DISTINCT d.eid AS doc_id
+                        FROM period_docs d
+                        JOIN auth_doc ad ON ad.doc_id = d.eid
+                        JOIN team_members tm ON tm.author_id = ad.auth_id
+                    ),
+                    doc_authors_raw AS (
+                        SELECT DISTINCT td.doc_id, ad.auth_id
+                        FROM team_docs td
+                        JOIN auth_doc ad ON ad.doc_id = td.doc_id
+                    ),
+                    doc_author_counts AS (
+                        SELECT doc_id, COUNT(*) AS k
+                        FROM doc_authors_raw
+                        GROUP BY doc_id
+                    ),
+                    doc_authors AS (
+                        SELECT dar.doc_id, dar.auth_id
+                        FROM doc_authors_raw dar
+                        JOIN doc_author_counts dac USING (doc_id)
+                        WHERE (? = 0 OR dac.k <= ?)
+                    )
+                    SELECT
+                        LEAST(a1.auth_id, a2.auth_id) AS source,
+                        GREATEST(a1.auth_id, a2.auth_id) AS target,
+                        COUNT(DISTINCT a1.doc_id) AS weight
+                    FROM doc_authors a1
+                    JOIN doc_authors a2
+                        ON a1.doc_id = a2.doc_id AND a1.auth_id < a2.auth_id
+                    GROUP BY source, target;
+                """
             
             with connect() as con:
-                node_rows = con.execute(
-                    nodes_sql, [period, team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
-                ).fetchall()
-                edge_rows = con.execute(
-                    edges_sql, [period, team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
-                ).fetchall()
+                if is_all_periods:
+                    node_rows = con.execute(
+                        nodes_sql, [team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
+                    ).fetchall()
+                    edge_rows = con.execute(
+                        edges_sql, [team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
+                    ).fetchall()
+                else:
+                    node_rows = con.execute(
+                        nodes_sql, [period, team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
+                    ).fetchall()
+                    edge_rows = con.execute(
+                        edges_sql, [period, team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
+                    ).fetchall()
             
             # Объединяем узлы - если автор уже есть, не создаём дубликат
             for row in node_rows:
@@ -756,26 +970,79 @@ async def get_multiple_teams_graph(
 @app.get("/api/authors/{author_id}/teams")
 async def get_author_teams(
     author_id: str,
-    period: str = Query(..., description="Sliding window period, e.g. 2023-2025"),
+    period: str = Query(..., description="Sliding window period, e.g. 2023-2025, or '2019-2025' for all periods"),
 ) -> JSONResponse:
     """
     Return list of teams (in a given period) where the author is a member.
     This is used by the frontend 'author info' popup.
     """
-    _, _ = parse_period(period)
-    sql = """
-        WITH team_members AS (
-            SELECT period, team_id, author_id, status
-            FROM teams
-            WHERE period = ?
-        ),
-        team_stats AS (
+    is_all_periods = period == "2019-2025"
+    if not is_all_periods:
+        _, _ = parse_period(period)
+    
+    if is_all_periods:
+        sql = """
+            WITH team_members AS (
+                SELECT team_id, author_id, status
+                FROM teams
+            ),
+            team_stats AS (
+                SELECT
+                    team_id,
+                    COUNT(DISTINCT author_id) AS authors_count,
+                    SUM(CASE WHEN status = 'core' THEN 1 ELSE 0 END) AS core_count,
+                    SUM(CASE WHEN status = 'periphery' THEN 1 ELSE 0 END) AS periphery_count
+                FROM team_members
+                GROUP BY team_id
+            ),
+            author_teams AS (
+                SELECT DISTINCT tm.team_id, 
+                       MAX(CASE WHEN tm.status = 'core' THEN 'core' ELSE 'periphery' END) AS author_status
+                FROM team_members tm
+                WHERE tm.author_id = ?
+                GROUP BY tm.team_id
+            )
             SELECT
-                period,
-                team_id,
-                COUNT(*) AS authors_count,
-                SUM(CASE WHEN status = 'core' THEN 1 ELSE 0 END) AS core_count,
-                SUM(CASE WHEN status = 'periphery' THEN 1 ELSE 0 END) AS periphery_count
+                aut.team_id,
+                aut.author_status,
+                ts.authors_count,
+                ts.core_count,
+                ts.periphery_count,
+                COALESCE(
+                    string_agg(
+                        DISTINCT a.lastname || ' ' || COALESCE(a.givenname, ''),
+                        ', '
+                    ),
+                    ''
+                ) AS sample_authors
+            FROM author_teams aut
+            JOIN team_stats ts ON ts.team_id = aut.team_id
+            LEFT JOIN LATERAL (
+                SELECT DISTINCT a.lastname, a.givenname
+                FROM team_members tm
+                JOIN authors a ON a.id = tm.author_id
+                WHERE tm.team_id = aut.team_id
+                ORDER BY (tm.status = 'periphery'), a.lastname
+                LIMIT 3
+            ) a ON true
+            GROUP BY aut.team_id, aut.author_status, ts.authors_count, ts.core_count, ts.periphery_count
+            ORDER BY aut.team_id;
+        """
+        params: list[Any] = [str(author_id)]
+    else:
+        sql = """
+            WITH team_members AS (
+                SELECT period, team_id, author_id, status
+                FROM teams
+                WHERE period = ?
+            ),
+            team_stats AS (
+                SELECT
+                    period,
+                    team_id,
+                    COUNT(*) AS authors_count,
+                    SUM(CASE WHEN status = 'core' THEN 1 ELSE 0 END) AS core_count,
+                    SUM(CASE WHEN status = 'periphery' THEN 1 ELSE 0 END) AS periphery_count
             FROM team_members
             GROUP BY period, team_id
         ),
@@ -809,8 +1076,8 @@ async def get_author_teams(
         ) a ON true
         GROUP BY aut.team_id, aut.author_status, ts.authors_count, ts.core_count, ts.periphery_count
         ORDER BY aut.team_id;
-    """
-    params: list[Any] = [period, str(author_id), period, period]
+        """
+        params: list[Any] = [period, str(author_id), period, period]
     with connect() as con:
         rows = con.execute(sql, params).fetchall()
     teams = [
@@ -909,7 +1176,7 @@ async def search_authors(
 @app.get("/api/teams/{team_id}/graph")
 async def get_team_graph(
     team_id: int,
-    period: str = Query(..., description="Sliding window period for the team"),
+    period: str = Query(..., description="Sliding window period for the team, or '2019-2025' for all periods"),
     max_authors_per_doc: int = Query(
         100,
         ge=0,
@@ -921,111 +1188,223 @@ async def get_team_graph(
     try:
         total_start = time.perf_counter()
         logger.info(f"[PERF] Loading graph for team {team_id}, period {period}")
-        start_year, end_year = parse_period(period)
+        is_all_periods = period == "2019-2025"
+        if is_all_periods:
+            start_year, end_year = 2019, 2025
+        else:
+            start_year, end_year = parse_period(period)
         
         # SQL для получения узлов: команда + окружение
-        nodes_sql = """
-            WITH team_members AS (
-                SELECT author_id, status
-                FROM teams
-                WHERE period = ? AND team_id = ?
-            ),
-            period_docs AS (
-                SELECT eid, year
-                FROM docs
-                WHERE year BETWEEN ? AND ?
-            ),
-            -- Находим все публикации команды
-            team_docs AS (
-                SELECT DISTINCT d.eid AS doc_id
-                FROM period_docs d
-                JOIN auth_doc ad ON ad.doc_id = d.eid
-                JOIN team_members tm ON tm.author_id = ad.auth_id
-            ),
-            -- Находим всех авторов публикаций команды (включая не из команды)
-            doc_authors_raw AS (
-                SELECT DISTINCT td.doc_id, ad.auth_id
-                FROM team_docs td
-                JOIN auth_doc ad ON ad.doc_id = td.doc_id
-            ),
-            doc_author_counts AS (
-                SELECT doc_id, COUNT(*) AS k
-                FROM doc_authors_raw
-                GROUP BY doc_id
-            ),
-            doc_authors AS (
-                SELECT dar.doc_id, dar.auth_id
-                FROM doc_authors_raw dar
-                JOIN doc_author_counts dac USING (doc_id)
-                WHERE (? = 0 OR dac.k <= ?)
-            ),
-            -- Статистика по узлам: команда (со статусом) и окружение (без статуса)
-            node_stats AS (
-                SELECT 
-                    da.auth_id,
-                    COUNT(DISTINCT da.doc_id) AS pubs,
-                    MAX(tm.status) AS status
-                FROM doc_authors da
-                LEFT JOIN team_members tm ON tm.author_id = da.auth_id
-                GROUP BY da.auth_id
-            )
-            SELECT
-                ns.auth_id,
-                a.lastname,
-                a.givenname,
-                ns.pubs,
-                ns.status
-            FROM node_stats ns
-            LEFT JOIN authors a ON a.id = ns.auth_id
-            ORDER BY ns.status IS NULL, ns.pubs DESC;
-        """
+        if is_all_periods:
+            nodes_sql = """
+                WITH team_members AS (
+                    SELECT DISTINCT author_id, 
+                           MAX(CASE WHEN status = 'core' THEN 'core' ELSE 'periphery' END) AS status
+                    FROM teams
+                    WHERE team_id = ?
+                    GROUP BY author_id
+                ),
+                period_docs AS (
+                    SELECT eid, year
+                    FROM docs
+                    WHERE year BETWEEN ? AND ?
+                ),
+                -- Находим все публикации команды
+                team_docs AS (
+                    SELECT DISTINCT d.eid AS doc_id
+                    FROM period_docs d
+                    JOIN auth_doc ad ON ad.doc_id = d.eid
+                    JOIN team_members tm ON tm.author_id = ad.auth_id
+                ),
+                -- Находим всех авторов публикаций команды (включая не из команды)
+                doc_authors_raw AS (
+                    SELECT DISTINCT td.doc_id, ad.auth_id
+                    FROM team_docs td
+                    JOIN auth_doc ad ON ad.doc_id = td.doc_id
+                ),
+                doc_author_counts AS (
+                    SELECT doc_id, COUNT(*) AS k
+                    FROM doc_authors_raw
+                    GROUP BY doc_id
+                ),
+                doc_authors AS (
+                    SELECT dar.doc_id, dar.auth_id
+                    FROM doc_authors_raw dar
+                    JOIN doc_author_counts dac USING (doc_id)
+                    WHERE (? = 0 OR dac.k <= ?)
+                ),
+                -- Статистика по узлам: команда (со статусом) и окружение (без статуса)
+                node_stats AS (
+                    SELECT 
+                        da.auth_id,
+                        COUNT(DISTINCT da.doc_id) AS pubs,
+                        MAX(tm.status) AS status
+                    FROM doc_authors da
+                    LEFT JOIN team_members tm ON tm.author_id = da.auth_id
+                    GROUP BY da.auth_id
+                )
+                SELECT
+                    ns.auth_id,
+                    a.lastname,
+                    a.givenname,
+                    ns.pubs,
+                    ns.status
+                FROM node_stats ns
+                LEFT JOIN authors a ON a.id = ns.auth_id
+                ORDER BY ns.status IS NULL, ns.pubs DESC;
+            """
+        else:
+            nodes_sql = """
+                WITH team_members AS (
+                    SELECT author_id, status
+                    FROM teams
+                    WHERE period = ? AND team_id = ?
+                ),
+                period_docs AS (
+                    SELECT eid, year
+                    FROM docs
+                    WHERE year BETWEEN ? AND ?
+                ),
+                -- Находим все публикации команды
+                team_docs AS (
+                    SELECT DISTINCT d.eid AS doc_id
+                    FROM period_docs d
+                    JOIN auth_doc ad ON ad.doc_id = d.eid
+                    JOIN team_members tm ON tm.author_id = ad.auth_id
+                ),
+                -- Находим всех авторов публикаций команды (включая не из команды)
+                doc_authors_raw AS (
+                    SELECT DISTINCT td.doc_id, ad.auth_id
+                    FROM team_docs td
+                    JOIN auth_doc ad ON ad.doc_id = td.doc_id
+                ),
+                doc_author_counts AS (
+                    SELECT doc_id, COUNT(*) AS k
+                    FROM doc_authors_raw
+                    GROUP BY doc_id
+                ),
+                doc_authors AS (
+                    SELECT dar.doc_id, dar.auth_id
+                    FROM doc_authors_raw dar
+                    JOIN doc_author_counts dac USING (doc_id)
+                    WHERE (? = 0 OR dac.k <= ?)
+                ),
+                -- Статистика по узлам: команда (со статусом) и окружение (без статуса)
+                node_stats AS (
+                    SELECT 
+                        da.auth_id,
+                        COUNT(DISTINCT da.doc_id) AS pubs,
+                        MAX(tm.status) AS status
+                    FROM doc_authors da
+                    LEFT JOIN team_members tm ON tm.author_id = da.auth_id
+                    GROUP BY da.auth_id
+                )
+                SELECT
+                    ns.auth_id,
+                    a.lastname,
+                    a.givenname,
+                    ns.pubs,
+                    ns.status
+                FROM node_stats ns
+                LEFT JOIN authors a ON a.id = ns.auth_id
+                ORDER BY ns.status IS NULL, ns.pubs DESC;
+            """
         
         # SQL для получения рёбер: внутри команды, команда-окружение, внутри окружения
-        edges_sql = """
-            WITH team_members AS (
-                SELECT author_id, status
-                FROM teams
-                WHERE period = ? AND team_id = ?
-            ),
-            period_docs AS (
-                SELECT eid, year
-                FROM docs
-                WHERE year BETWEEN ? AND ?
-            ),
-            -- Находим все публикации команды
-            team_docs AS (
-                SELECT DISTINCT d.eid AS doc_id
-                FROM period_docs d
-                JOIN auth_doc ad ON ad.doc_id = d.eid
-                JOIN team_members tm ON tm.author_id = ad.auth_id
-            ),
-            -- Находим всех авторов публикаций команды
-            doc_authors_raw AS (
-                SELECT DISTINCT td.doc_id, ad.auth_id
-                FROM team_docs td
-                JOIN auth_doc ad ON ad.doc_id = td.doc_id
-            ),
-            doc_author_counts AS (
-                SELECT doc_id, COUNT(*) AS k
-                FROM doc_authors_raw
-                GROUP BY doc_id
-            ),
-            doc_authors AS (
-                SELECT dar.doc_id, dar.auth_id
-                FROM doc_authors_raw dar
-                JOIN doc_author_counts dac USING (doc_id)
-                WHERE (? = 0 OR dac.k <= ?)
-            )
-            -- Рёбра: все связи между авторами публикаций команды
-            SELECT
-                LEAST(a1.auth_id, a2.auth_id) AS source,
-                GREATEST(a1.auth_id, a2.auth_id) AS target,
-                COUNT(DISTINCT a1.doc_id) AS weight
-            FROM doc_authors a1
-            JOIN doc_authors a2
-                ON a1.doc_id = a2.doc_id AND a1.auth_id < a2.auth_id
-            GROUP BY source, target;
-        """
+        if is_all_periods:
+            edges_sql = """
+                WITH team_members AS (
+                    SELECT DISTINCT author_id, 
+                           MAX(CASE WHEN status = 'core' THEN 'core' ELSE 'periphery' END) AS status
+                    FROM teams
+                    WHERE team_id = ?
+                    GROUP BY author_id
+                ),
+                period_docs AS (
+                    SELECT eid, year
+                    FROM docs
+                    WHERE year BETWEEN ? AND ?
+                ),
+                -- Находим все публикации команды
+                team_docs AS (
+                    SELECT DISTINCT d.eid AS doc_id
+                    FROM period_docs d
+                    JOIN auth_doc ad ON ad.doc_id = d.eid
+                    JOIN team_members tm ON tm.author_id = ad.auth_id
+                ),
+                -- Находим всех авторов публикаций команды
+                doc_authors_raw AS (
+                    SELECT DISTINCT td.doc_id, ad.auth_id
+                    FROM team_docs td
+                    JOIN auth_doc ad ON ad.doc_id = td.doc_id
+                ),
+                doc_author_counts AS (
+                    SELECT doc_id, COUNT(*) AS k
+                    FROM doc_authors_raw
+                    GROUP BY doc_id
+                ),
+                doc_authors AS (
+                    SELECT dar.doc_id, dar.auth_id
+                    FROM doc_authors_raw dar
+                    JOIN doc_author_counts dac USING (doc_id)
+                    WHERE (? = 0 OR dac.k <= ?)
+                )
+                -- Рёбра: все связи между авторами публикаций команды
+                SELECT
+                    LEAST(a1.auth_id, a2.auth_id) AS source,
+                    GREATEST(a1.auth_id, a2.auth_id) AS target,
+                    COUNT(DISTINCT a1.doc_id) AS weight
+                FROM doc_authors a1
+                JOIN doc_authors a2
+                    ON a1.doc_id = a2.doc_id AND a1.auth_id < a2.auth_id
+                GROUP BY source, target;
+            """
+        else:
+            edges_sql = """
+                WITH team_members AS (
+                    SELECT author_id, status
+                    FROM teams
+                    WHERE period = ? AND team_id = ?
+                ),
+                period_docs AS (
+                    SELECT eid, year
+                    FROM docs
+                    WHERE year BETWEEN ? AND ?
+                ),
+                -- Находим все публикации команды
+                team_docs AS (
+                    SELECT DISTINCT d.eid AS doc_id
+                    FROM period_docs d
+                    JOIN auth_doc ad ON ad.doc_id = d.eid
+                    JOIN team_members tm ON tm.author_id = ad.auth_id
+                ),
+                -- Находим всех авторов публикаций команды
+                doc_authors_raw AS (
+                    SELECT DISTINCT td.doc_id, ad.auth_id
+                    FROM team_docs td
+                    JOIN auth_doc ad ON ad.doc_id = td.doc_id
+                ),
+                doc_author_counts AS (
+                    SELECT doc_id, COUNT(*) AS k
+                    FROM doc_authors_raw
+                    GROUP BY doc_id
+                ),
+                doc_authors AS (
+                    SELECT dar.doc_id, dar.auth_id
+                    FROM doc_authors_raw dar
+                    JOIN doc_author_counts dac USING (doc_id)
+                    WHERE (? = 0 OR dac.k <= ?)
+                )
+                -- Рёбра: все связи между авторами публикаций команды
+                SELECT
+                    LEAST(a1.auth_id, a2.auth_id) AS source,
+                    GREATEST(a1.auth_id, a2.auth_id) AS target,
+                    COUNT(DISTINCT a1.doc_id) AS weight
+                FROM doc_authors a1
+                JOIN doc_authors a2
+                    ON a1.doc_id = a2.doc_id AND a1.auth_id < a2.auth_id
+                GROUP BY source, target;
+            """
         
         with connect() as con:
             # Анализ запроса узлов
