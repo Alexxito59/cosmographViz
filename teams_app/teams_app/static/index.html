@@ -210,6 +210,38 @@
     .chip.core { background: var(--accent-2); }
     .chip.periphery { background: var(--accent-3); }
     .chip.other { background: #9a9a9a; }
+    .author-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      background: #e9e9ee;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      font-size: 13px;
+      color: var(--text);
+    }
+    .author-chip-remove {
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      color: var(--muted);
+      padding: 0;
+      margin: 0;
+      background: none;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .author-chip-remove:hover {
+      background: rgba(0, 0, 0, 0.1);
+      color: var(--text);
+    }
     .pub-title { font-weight: 600; margin-bottom: 4px; }
     .central {
       position: relative;
@@ -555,6 +587,7 @@
           <button id="searchBtn">Найти</button>
           <button id="clearSearchBtn" style="background:#e9e9ee; color:#1f1f26; box-shadow:none;">Сброс</button>
         </div>
+        <div id="selectedAuthorsChips" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; min-height: 24px;"></div>
       </div>
       <div class="split">
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
@@ -722,6 +755,7 @@
       selectedPeriod: null,
       selectedTeam: null, // для обратной совместимости, но теперь используем selectedTeams
       selectedTeams: [], // массив выбранных команд
+      selectedAuthors: [], // массив выбранных авторов для поиска команд
       nodes: [],
       edges: [],
       nodeIndexById: new Map(),
@@ -768,6 +802,7 @@
     const authorSearch = document.getElementById("authorSearch");
     const searchBtn = document.getElementById("searchBtn");
     const clearSearchBtn = document.getElementById("clearSearchBtn");
+    const selectedAuthorsChips = document.getElementById("selectedAuthorsChips");
     const sortSelect = document.getElementById("sortSelect");
     const teamsList = document.getElementById("teamsList");
     const authorsList = document.getElementById("authorsList");
@@ -1077,11 +1112,37 @@
       }
     }
 
+    function renderSelectedAuthorsChips() {
+      if (!selectedAuthorsChips) return;
+      selectedAuthorsChips.innerHTML = "";
+      state.selectedAuthors.forEach((author, index) => {
+        const chip = document.createElement("div");
+        chip.className = "author-chip";
+        chip.innerHTML = `
+          <span>${author}</span>
+          <button class="author-chip-remove" data-index="${index}" title="Удалить">×</button>
+        `;
+        const removeBtn = chip.querySelector(".author-chip-remove");
+        removeBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const idx = parseInt(removeBtn.getAttribute("data-index"), 10);
+          state.selectedAuthors.splice(idx, 1);
+          renderSelectedAuthorsChips();
+          loadTeams();
+        });
+        selectedAuthorsChips.appendChild(chip);
+      });
+    }
+
     async function loadTeams() {
       if (!state.selectedPeriod) return;
-      const query = authorSearch.value.trim();
       const qs = new URLSearchParams({ period: state.selectedPeriod });
-      if (query) qs.set("query", query);
+      // Если есть выбранные авторы, передаём их как массив
+      if (state.selectedAuthors.length > 0) {
+        state.selectedAuthors.forEach((author) => {
+          qs.append("authors", author);
+        });
+      }
       const data = await fetchJson(`/api/teams?${qs.toString()}`);
       state.teams = data.teams || [];
       renderTeams();
@@ -2566,9 +2627,22 @@
       renderTeams();
     });
 
-    searchBtn.addEventListener("click", loadTeams);
+    searchBtn.addEventListener("click", () => {
+      const query = authorSearch.value.trim();
+      if (query) {
+        // Добавляем автора в список, если его ещё нет
+        if (!state.selectedAuthors.includes(query)) {
+          state.selectedAuthors.push(query);
+          renderSelectedAuthorsChips();
+        }
+        authorSearch.value = ""; // Очищаем поле ввода
+        loadTeams();
+      }
+    });
     clearSearchBtn.addEventListener("click", async () => {
       authorSearch.value = "";
+      state.selectedAuthors = [];
+      renderSelectedAuthorsChips();
       await loadTeams();
       state.teamMembers.clear();
       state.selectedTeam = null;
@@ -2601,7 +2675,18 @@
       authorSearch.focus();
     });
     authorSearch.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") loadTeams();
+      if (e.key === "Enter") {
+        const query = authorSearch.value.trim();
+        if (query) {
+          // Добавляем автора в список, если его ещё нет
+          if (!state.selectedAuthors.includes(query)) {
+            state.selectedAuthors.push(query);
+            renderSelectedAuthorsChips();
+          }
+          authorSearch.value = ""; // Очищаем поле ввода
+          loadTeams();
+        }
+      }
       if (e.key === "Escape") clearSearchBtn.click();
     });
 

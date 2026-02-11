@@ -94,11 +94,39 @@ async def get_periods() -> JSONResponse:
 @app.get("/api/teams")
 async def list_teams(
     period: str = Query(..., description="Sliding window period, e.g. 2023-2025"),
-    query: str | None = Query(None, description="Filter teams by author name"),
+    query: str | None = Query(None, description="Filter teams by author name (deprecated, use authors)"),
+    authors: list[str] = Query(default=[], description="Filter teams by multiple author names (all must be in team)"),
 ) -> JSONResponse:
     _, _ = parse_period(period)
-    query_param = f"%{query.lower()}%" if query else None
-    sql = """
+    
+    # Поддержка обратной совместимости: если передан query, используем его
+    author_queries = []
+    if query:
+        author_queries.append(f"%{query.lower()}%")
+    if authors:
+        author_queries.extend([f"%{a.lower()}%" for a in authors])
+    
+    # Если есть запросы авторов, ищем команды где ВСЕ указанные авторы присутствуют
+    if author_queries:
+        # Для каждого автора проверяем, что он есть в команде
+        author_conditions = []
+        for i, author_query in enumerate(author_queries):
+            author_conditions.append(f"""
+                EXISTS (
+                    SELECT 1
+                    FROM team_members tm{i}
+                    JOIN authors a{i} ON a{i}.id = tm{i}.author_id
+                    WHERE tm{i}.team_id = ts.team_id
+                        AND tm{i}.period = ts.period
+                        AND LOWER(a{i}.lastname || ' ' || COALESCE(a{i}.givenname, '')) LIKE ?
+                )
+            """)
+        
+        filter_condition = " AND ".join(author_conditions)
+    else:
+        filter_condition = "1=1"  # Нет фильтрации
+    
+    sql = f"""
         WITH team_members AS (
             SELECT period, team_id, author_id, status
             FROM teams
@@ -117,16 +145,7 @@ async def list_teams(
         filtered_teams AS (
             SELECT ts.*
             FROM team_stats ts
-            WHERE
-                ? IS NULL
-                OR EXISTS (
-                    SELECT 1
-                    FROM team_members tm
-                    JOIN authors a ON a.id = tm.author_id
-                    WHERE tm.team_id = ts.team_id
-                        AND tm.period = ts.period
-                        AND LOWER(a.lastname || ' ' || COALESCE(a.givenname, '')) LIKE ?
-                )
+            WHERE {filter_condition}
         )
         SELECT
             ft.team_id,
@@ -152,7 +171,12 @@ async def list_teams(
         GROUP BY ft.team_id, ft.authors_count, ft.core_count, ft.periphery_count
         ORDER BY ft.team_id
     """
-    params: list[Any] = [period, query_param, query_param]
+    # Параметры: period + все author_queries (каждый для EXISTS условия)
+    params: list[Any] = [period]
+    if author_queries:
+        # Для каждого автора добавляем параметр в EXISTS условие
+        params.extend(author_queries)
+    
     with connect() as con:
         rows = con.execute(sql, params).fetchall()
     data = [
