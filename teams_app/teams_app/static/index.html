@@ -1156,21 +1156,27 @@
     function renderTeams() {
       teamsList.innerHTML = "";
       if (!state.teams.length) {
-        teamsList.innerHTML = '<div class="empty">Нет команд</div>';
+        teamsList.innerHTML = '<div class="empty">Нажмите "Найти" для отображения всех команд периода</div>';
         return;
       }
       // Сортировка команд
       const sortedTeams = [...state.teams].sort((a, b) => {
         if (state.sortOrder === "period_desc" || state.sortOrder === "period_asc") {
-          // Сортировка по величине периода
+          // Сортировка по периоду (берем левое число - start_year)
           const getPeriodValue = (team) => {
             if (team.period) {
-              // Обычный период: вычисляем длину периода (end_year - start_year)
-              const [start, end] = team.period.split("-").map(Number);
-              return end - start;
+              // Обычный период: берем левое число (start_year)
+              const [start] = team.period.split("-").map(Number);
+              return start || 0;
             } else if (team.periods) {
-              // Период "2019-2025": считаем количество периодов
-              return team.periods.split(",").length;
+              // Период "2019-2025": берем минимальное start_year из всех периодов
+              const periods = team.periods.split(",").map(p => p.trim()).filter(p => p);
+              if (periods.length === 0) return 0;
+              const startYears = periods.map(p => {
+                const [start] = p.split("-").map(Number);
+                return start || 0;
+              });
+              return Math.min(...startYears);
             }
             return 0;
           };
@@ -1178,10 +1184,18 @@
           const periodA = getPeriodValue(a);
           const periodB = getPeriodValue(b);
           
+          // period_desc (↓ По убыванию) = от большего к меньшему
+          // period_asc (↑ По возрастанию) = от меньшего к большему
           if (state.sortOrder === "period_asc") {
-            return periodA - periodB;
+            // По возрастанию: меньшие значения первыми
+            const result = periodA - periodB;
+            // Если значения равны, сортируем по team_id для стабильности
+            return result !== 0 ? result : a.team_id - b.team_id;
           } else {
-            return periodB - periodA;
+            // По убыванию: большие значения первыми
+            const result = periodB - periodA;
+            // Если значения равны, сортируем по team_id для стабильности
+            return result !== 0 ? result : a.team_id - b.team_id;
           }
         } else {
           // Сортировка по количеству членов
@@ -2644,7 +2658,12 @@
 
     periodSelect.addEventListener("change", async () => {
       state.selectedPeriod = periodSelect.value;
-      await loadTeams();
+      // Очищаем список команд и выбранных авторов при изменении периода
+      state.teams = [];
+      state.selectedAuthors = [];
+      authorSearch.value = "";
+      renderSelectedAuthorsChips();
+      renderTeams();
       // IMPORTANT: do not rebuild/reload the full graph on period change.
       // The graph will update only when the user selects a team (team graph) or explicitly resets to full graph elsewhere.
       teamTitle.textContent = "–";
@@ -2652,11 +2671,23 @@
       pubsList.innerHTML = "";
       state.teamMembers.clear();
       state.selectedTeam = null;
-      renderTeams();
     });
 
     sortSelect.addEventListener("change", () => {
       state.sortOrder = sortSelect.value;
+      console.log("[DEBUG] Sort order:", state.sortOrder);
+      if (state.sortOrder === "period_desc" || state.sortOrder === "period_asc") {
+        // Отладка: проверяем значения периода для первых 5 команд
+        state.teams.slice(0, 5).forEach(team => {
+          const periodValue = team.period 
+            ? (() => {
+                const [start, end] = team.period.split("-").map(Number);
+                return end - start;
+              })()
+            : (team.periods ? team.periods.split(",").map(p => p.trim()).filter(p => p).length : 0);
+          console.log(`[DEBUG] Team ${team.team_id}: period="${team.period || team.periods || 'none'}", value=${periodValue}`);
+        });
+      }
       renderTeams();
     });
 
@@ -2670,6 +2701,11 @@
         }
         authorSearch.value = ""; // Очищаем поле ввода
         loadTeams();
+      } else {
+        // Если поле пустое и список авторов пуст, загружаем все команды периода
+        if (state.selectedAuthors.length === 0) {
+          loadTeams();
+        }
       }
     });
     clearSearchBtn.addEventListener("click", async () => {
@@ -2718,6 +2754,11 @@
           }
           authorSearch.value = ""; // Очищаем поле ввода
           loadTeams();
+        } else {
+          // Если поле пустое и список авторов пуст, загружаем все команды периода
+          if (state.selectedAuthors.length === 0) {
+            loadTeams();
+          }
         }
       }
       if (e.key === "Escape") clearSearchBtn.click();
@@ -3006,7 +3047,10 @@
 
     (async function init() {
       await loadPeriods();
-      await loadTeams();
+      // Не загружаем команды автоматически при инициализации
+      // Команды будут загружены только при нажатии кнопки "Найти" с пустым списком авторов
+      state.teams = [];
+      renderTeams();
       settingInputs.includeSinglePub.checked = state.includeSinglePub;
       showPlaceholder();
       syncPlayPauseButton();
