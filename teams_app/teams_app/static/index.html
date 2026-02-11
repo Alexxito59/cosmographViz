@@ -950,6 +950,9 @@
                 <div class="small">${status}</div>
               </div>
               <div class="subline">${t.sample_authors || "—"}</div>
+              <div class="subline" style="font-size: 11px; color: var(--muted);">
+                ${t.period ? `Период: ${t.period}` : t.periods ? `Периоды: ${t.periods}` : ""}
+              </div>
               <div class="subline">Всего авторов: ${t.authors_count} • core: ${t.core_count} • periphery: ${t.periphery_count}</div>
             </div>
           `;

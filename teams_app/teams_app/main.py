@@ -1065,7 +1065,15 @@ async def get_author_teams(
                         ', '
                     ),
                     ''
-                ) AS sample_authors
+                ) AS sample_authors,
+                COALESCE(
+                    string_agg(
+                        DISTINCT tm.period,
+                        ', '
+                        ORDER BY tm.period
+                    ),
+                    ''
+                ) AS periods
             FROM author_teams aut
             JOIN team_stats ts ON ts.team_id = aut.team_id
             LEFT JOIN LATERAL (
@@ -1076,6 +1084,7 @@ async def get_author_teams(
                 ORDER BY (tm.status = 'periphery'), a.lastname
                 LIMIT 3
             ) a ON true
+            LEFT JOIN teams tm ON tm.team_id = aut.team_id
             GROUP BY aut.team_id, aut.author_status, ts.authors_count, ts.core_count, ts.periphery_count
             ORDER BY aut.team_id;
         """
@@ -1105,6 +1114,7 @@ async def get_author_teams(
         SELECT
             aut.team_id,
             aut.author_status,
+            ts.period,
             ts.authors_count,
             ts.core_count,
             ts.periphery_count,
@@ -1125,23 +1135,39 @@ async def get_author_teams(
             ORDER BY (tm.status = 'periphery'), a.lastname
             LIMIT 3
         ) a ON true
-        GROUP BY aut.team_id, aut.author_status, ts.authors_count, ts.core_count, ts.periphery_count
+        GROUP BY aut.team_id, aut.author_status, ts.period, ts.authors_count, ts.core_count, ts.periphery_count
         ORDER BY aut.team_id;
         """
         params: list[Any] = [period, str(author_id), period, period]
     with connect() as con:
         rows = con.execute(sql, params).fetchall()
-    teams = [
-        {
-            "team_id": int(row[0]),
-            "author_status": row[1] or "core",
-            "authors_count": int(row[2]),
-            "core_count": int(row[3]),
-            "periphery_count": int(row[4]),
-            "sample_authors": row[5],
-        }
-        for row in rows
-    ]
+    
+    if is_all_periods:
+        teams = [
+            {
+                "team_id": int(row[0]),
+                "author_status": row[1] or "core",
+                "authors_count": int(row[2]),
+                "core_count": int(row[3]),
+                "periphery_count": int(row[4]),
+                "sample_authors": row[5],
+                "periods": row[6] if len(row) > 6 else "",
+            }
+            for row in rows
+        ]
+    else:
+        teams = [
+            {
+                "team_id": int(row[0]),
+                "author_status": row[1] or "core",
+                "period": row[2],
+                "authors_count": int(row[3]),
+                "core_count": int(row[4]),
+                "periphery_count": int(row[5]),
+                "sample_authors": row[6],
+            }
+            for row in rows
+        ]
     return JSONResponse({"author_id": str(author_id), "period": period, "teams": teams})
 
 
