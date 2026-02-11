@@ -481,7 +481,31 @@ async def get_team_detail(
                 WHERE team_id = ?
                 GROUP BY author_id
             ),
-    """
+            doc_authors AS (
+                SELECT
+                    d.eid AS doc_id,
+                    d.title,
+                    d.year,
+                    ad.auth_id,
+                    ad.auth_seqn,
+                    a.lastname,
+                    a.givenname,
+                    tm.status AS team_status
+                FROM period_docs d
+                JOIN auth_doc ad ON ad.doc_id = d.eid
+                JOIN authors a ON a.id = ad.auth_id
+                LEFT JOIN team_members tm ON tm.author_id = ad.auth_id
+            ),
+            team_docs AS (
+                SELECT DISTINCT doc_id
+                FROM doc_authors
+                WHERE team_status IS NOT NULL
+            )
+            SELECT *
+            FROM doc_authors
+            WHERE doc_id IN (SELECT doc_id FROM team_docs)
+            ORDER BY year DESC, doc_id, auth_seqn;
+        """
     else:
         authors_sql = """
             SELECT a.id, a.lastname, a.givenname, t.status
@@ -1411,7 +1435,10 @@ async def get_team_graph(
             if explain:
                 logger.info("[PERF] EXPLAIN ANALYZE for team nodes query:")
                 # Подставляем параметры для EXPLAIN ANALYZE (осторожно с типами)
-                explain_nodes_sql = nodes_sql.replace("?", f"'{period}'").replace("?", str(team_id)).replace("?", str(start_year)).replace("?", str(end_year)).replace("?", str(max_authors_per_doc)).replace("?", str(max_authors_per_doc))
+                if is_all_periods:
+                    explain_nodes_sql = nodes_sql.replace("?", str(team_id)).replace("?", str(start_year)).replace("?", str(end_year)).replace("?", str(max_authors_per_doc)).replace("?", str(max_authors_per_doc))
+                else:
+                    explain_nodes_sql = nodes_sql.replace("?", f"'{period}'").replace("?", str(team_id)).replace("?", str(start_year)).replace("?", str(end_year)).replace("?", str(max_authors_per_doc)).replace("?", str(max_authors_per_doc))
                 try:
                     explain_nodes = con.execute(f"EXPLAIN ANALYZE {explain_nodes_sql}").fetchall()
                     for row in explain_nodes:
@@ -1420,9 +1447,14 @@ async def get_team_graph(
                     logger.warning(f"[PERF] Failed to get EXPLAIN ANALYZE: {e}")
             
             node_query_start = time.perf_counter()
-            node_rows = con.execute(
-                nodes_sql, [period, team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
-            ).fetchall()
+            if is_all_periods:
+                node_rows = con.execute(
+                    nodes_sql, [team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
+                ).fetchall()
+            else:
+                node_rows = con.execute(
+                    nodes_sql, [period, team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
+                ).fetchall()
             node_query_time = time.perf_counter() - node_query_start
             logger.info(f"[PERF] Team nodes query: {node_query_time:.3f}s, rows: {len(node_rows)}")
             
@@ -1430,7 +1462,10 @@ async def get_team_graph(
             if explain:
                 logger.info("[PERF] EXPLAIN ANALYZE for team edges query:")
                 # Подставляем параметры для EXPLAIN ANALYZE (осторожно с типами)
-                explain_edges_sql = edges_sql.replace("?", f"'{period}'").replace("?", str(team_id)).replace("?", str(start_year)).replace("?", str(end_year)).replace("?", str(max_authors_per_doc)).replace("?", str(max_authors_per_doc))
+                if is_all_periods:
+                    explain_edges_sql = edges_sql.replace("?", str(team_id)).replace("?", str(start_year)).replace("?", str(end_year)).replace("?", str(max_authors_per_doc)).replace("?", str(max_authors_per_doc))
+                else:
+                    explain_edges_sql = edges_sql.replace("?", f"'{period}'").replace("?", str(team_id)).replace("?", str(start_year)).replace("?", str(end_year)).replace("?", str(max_authors_per_doc)).replace("?", str(max_authors_per_doc))
                 try:
                     explain_edges = con.execute(f"EXPLAIN ANALYZE {explain_edges_sql}").fetchall()
                     for row in explain_edges:
@@ -1439,9 +1474,14 @@ async def get_team_graph(
                     logger.warning(f"[PERF] Failed to get EXPLAIN ANALYZE: {e}")
             
             edge_query_start = time.perf_counter()
-            edge_rows = con.execute(
-                edges_sql, [period, team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
-            ).fetchall()
+            if is_all_periods:
+                edge_rows = con.execute(
+                    edges_sql, [team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
+                ).fetchall()
+            else:
+                edge_rows = con.execute(
+                    edges_sql, [period, team_id, start_year, end_year, max_authors_per_doc, max_authors_per_doc]
+                ).fetchall()
             edge_query_time = time.perf_counter() - edge_query_start
             logger.info(f"[PERF] Team edges query: {edge_query_time:.3f}s, rows: {len(edge_rows)}")
         
