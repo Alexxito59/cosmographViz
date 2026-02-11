@@ -175,7 +175,15 @@ async def list_teams(
                         ', '
                     ),
                     ''
-                ) AS sample_authors
+                ) AS sample_authors,
+                COALESCE(
+                    string_agg(
+                        DISTINCT tm.period,
+                        ', '
+                        ORDER BY tm.period
+                    ),
+                    ''
+                ) AS periods
             FROM filtered_teams ft
             LEFT JOIN LATERAL (
                 SELECT DISTINCT a.lastname, a.givenname
@@ -185,6 +193,7 @@ async def list_teams(
                 ORDER BY (tm.status = 'periphery'), a.lastname
                 LIMIT 3
             ) a ON true
+            LEFT JOIN teams tm ON tm.team_id = ft.team_id
             GROUP BY ft.team_id, ft.authors_count, ft.core_count, ft.periphery_count
             ORDER BY ft.team_id
         """
@@ -213,6 +222,7 @@ async def list_teams(
         )
         SELECT
             ft.team_id,
+            ft.period,
             ft.authors_count,
             ft.core_count,
             ft.periphery_count,
@@ -232,7 +242,7 @@ async def list_teams(
             ORDER BY (tm.status = 'periphery'), a.lastname
             LIMIT 3
         ) a ON true
-        GROUP BY ft.team_id, ft.authors_count, ft.core_count, ft.periphery_count
+        GROUP BY ft.team_id, ft.period, ft.authors_count, ft.core_count, ft.periphery_count
         ORDER BY ft.team_id
         """
         params: list[Any] = [period]
@@ -244,16 +254,33 @@ async def list_teams(
     
     with connect() as con:
         rows = con.execute(sql, params).fetchall()
-    data = [
-        {
-            "team_id": int(row[0]),
-            "authors_count": int(row[1]),
-            "core_count": int(row[2]),
-            "periphery_count": int(row[3]),
-            "sample_authors": row[4],
-        }
-        for row in rows
-    ]
+    
+    if is_all_periods:
+        # Для всех периодов: periods - это строка со списком периодов через запятую
+        data = [
+            {
+                "team_id": int(row[0]),
+                "authors_count": int(row[1]),
+                "core_count": int(row[2]),
+                "periphery_count": int(row[3]),
+                "sample_authors": row[4],
+                "periods": row[5] if len(row) > 5 else "",
+            }
+            for row in rows
+        ]
+    else:
+        # Для обычных периодов: period - это один период
+        data = [
+            {
+                "team_id": int(row[0]),
+                "period": row[1],
+                "authors_count": int(row[2]),
+                "core_count": int(row[3]),
+                "periphery_count": int(row[4]),
+                "sample_authors": row[5],
+            }
+            for row in rows
+        ]
     return JSONResponse({"teams": data})
 
 

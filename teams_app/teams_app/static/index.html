@@ -595,6 +595,8 @@
           <select id="sortSelect" style="font-size: 12px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff;">
             <option value="desc">↓ По убыванию размера</option>
             <option value="asc">↑ По возрастанию размера</option>
+            <option value="period_desc">↓ По убыванию периода</option>
+            <option value="period_asc">↑ По возрастанию периода</option>
           </select>
         </div>
         <div id="teamsList" class="list"></div>
@@ -1154,12 +1156,37 @@
         teamsList.innerHTML = '<div class="empty">Нет команд</div>';
         return;
       }
-      // Сортировка команд по количеству членов
+      // Сортировка команд
       const sortedTeams = [...state.teams].sort((a, b) => {
-        if (state.sortOrder === "asc") {
-          return a.authors_count - b.authors_count;
+        if (state.sortOrder === "period_desc" || state.sortOrder === "period_asc") {
+          // Сортировка по величине периода
+          const getPeriodValue = (team) => {
+            if (team.period) {
+              // Обычный период: вычисляем длину периода (end_year - start_year)
+              const [start, end] = team.period.split("-").map(Number);
+              return end - start;
+            } else if (team.periods) {
+              // Период "2019-2025": считаем количество периодов
+              return team.periods.split(",").length;
+            }
+            return 0;
+          };
+          
+          const periodA = getPeriodValue(a);
+          const periodB = getPeriodValue(b);
+          
+          if (state.sortOrder === "period_asc") {
+            return periodA - periodB;
+          } else {
+            return periodB - periodA;
+          }
         } else {
-          return b.authors_count - a.authors_count;
+          // Сортировка по количеству членов
+          if (state.sortOrder === "asc") {
+            return a.authors_count - b.authors_count;
+          } else {
+            return b.authors_count - a.authors_count;
+          }
         }
       });
       sortedTeams.forEach((team) => {
@@ -1171,6 +1198,9 @@
             <div>
               <div class="team-title">Команда #${team.team_id}</div>
               <div class="team-sub">${team.sample_authors || "—"}</div>
+              <div class="team-sub" style="font-size: 11px; color: var(--muted); margin-top: 2px;">
+                ${team.period ? `Период: ${team.period}` : team.periods ? `Периоды: ${team.periods}` : ""}
+              </div>
             </div>
             <div>
               <span class="badge"><span class="dot core"></span>${team.core_count}</span>
